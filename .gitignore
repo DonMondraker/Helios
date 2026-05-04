@@ -1,0 +1,4 @@
+node_modules/
+dist/
+!app/helios_editor/dist/
+!app/helios_editor/dist/**
