@@ -811,7 +811,7 @@ def main():
         active_filename = st.session_state.loaded_project_filename or "loaded_project.png"
 
     else:
-        st.info("Upload an image or load a saved project JSON to begin.")
+        # st.info("Upload an image or load a saved project JSON to begin.")
         return
     normalized_image = normalize_creoview_image(raw_image)
     image = normalized_image
