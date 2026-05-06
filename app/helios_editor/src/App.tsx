@@ -14,6 +14,8 @@ import useImage from "use-image";
 
 import sampleImage from "./assets/battD.jpg";
 
+projectKey?: string | null;
+
 type Tool = "select" | "draw" | "callout" | "detail" | "inset" | "focus";
 
 type EditorLine = {
@@ -125,7 +127,8 @@ const SNAP_ANGLES = [0, 45, 90, 135, 180, -45, -90, -135, -180];
 const HALO_COLOR = "white";
 const ANNOTATION_COLOR = "black";
 const SELECTED_COLOR = "#50ae91";
-const EDITOR_STORAGE_KEY = `helios_editor_draft_v1_${imageSrc?.length ?? 0}`;
+const getEditorStorageKey = (projectKey?: string | null) =>
+  `helios_editor_draft_v1_${projectKey ?? "default"}`;
 
 function snapEndpoint(
   x1: number,
@@ -372,11 +375,14 @@ function App({
   aiSuggestions,
   pendingInsetAsset,
   exportRequestId,
+  projectKey,
 }: HeliosEditorProps) {
 
   const s = (value: number) => value / scale;
   const [image] = useImage(imageSrc ?? sampleImage);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  const editorStorageKey = getEditorStorageKey(projectKey);
 
   const stageRef = useRef<any>(null);
   const lastExportRequestIdRef = useRef<string | null>(null);
@@ -608,18 +614,42 @@ function App({
 //   ]);
 
   useEffect(() => {
+    if (!hasHydratedInitialStateRef.current) return;
+    if (isHydratingInitialStateRef.current) return;
+
+    try {
+      localStorage.setItem(
+        editorStorageKey,
+        JSON.stringify(getEditorState())
+      );
+    } catch {}
+  }, [
+    editorStorageKey,
+    lines,
+    callouts,
+    insets,
+    insetImages,
+    focusObjects,
+    selectedObjectId,
+  ]);
+
+  useEffect(() => {
     if (hasHydratedInitialStateRef.current) return;
 
     isHydratingInitialStateRef.current = true;
 
-    let stateToLoad = initialState;
+    let stateToLoad: Partial<HeliosEditorState> | null | undefined = null;
 
     try {
-      const saved = localStorage.getItem(EDITOR_STORAGE_KEY);
+      const saved = localStorage.getItem(editorStorageKey);
       if (saved) {
         stateToLoad = JSON.parse(saved);
       }
     } catch {}
+
+    if (!stateToLoad && initialState) {
+      stateToLoad = initialState;
+    }
 
     if (stateToLoad) {
       if (stateToLoad.lines) setLines(stateToLoad.lines);
@@ -638,7 +668,7 @@ function App({
     requestAnimationFrame(() => {
       isHydratingInitialStateRef.current = false;
     });
-  }, [initialState]);
+  }, [initialState, editorStorageKey]);
 
   useEffect(() => {
     const updateScale = () => {

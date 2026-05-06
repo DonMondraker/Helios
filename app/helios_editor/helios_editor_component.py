@@ -28,6 +28,7 @@ def helios_editor(
         initial_state=None,
         pending_inset_asset=None,
         export_request_id=None,
+        project_key=None,
         debug=False,
         key=None,
 ):
@@ -42,6 +43,7 @@ def helios_editor(
         height=1200,
         pendingInsetAsset=pending_inset_asset,
         exportRequestId=export_request_id,
+        projectKey=project_key,
     )
 
     return component_value

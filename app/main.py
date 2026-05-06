@@ -1439,6 +1439,13 @@ def main():
                 )
             )
 
+            editor_project_key = st.session_state.get("editor_project_key")
+
+            if not editor_project_key:
+                editor_project_key = str(uuid.uuid4())
+                st.session_state.editor_project_key = editor_project_key
+                st.session_state.react_editor_state = None
+
             react_editor_state = helios_editor(
                 image_src=editor_image_src,
                 focus_objects=focus_objects_for_editor,
@@ -1447,6 +1454,7 @@ def main():
                 debug=st.session_state.get("ui_mode", "Production") == "Debug",
                 pending_inset_asset=pending_inset_asset_to_react(st.session_state),
                 export_request_id=st.session_state.get("export_request_id"),
+                project_key=st.session_state.editor_project_key,
                 key="helios_react_editor",
             )
 
