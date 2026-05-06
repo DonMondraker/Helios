@@ -1294,15 +1294,15 @@ def main():
                         f"Deterministic suggestion preview ready: {movement_count} movement line(s), {callout_count} callout(s)."
                     )
 
-                    if st.button("Apply AI Lines", use_container_width=True):
-                        for line in ai_annotation_suggestions.get("movement_lines", []):
-                            st.session_state.approved_ai_lines.append(
-                                {
-                                    "start": [int(line["start"][0]), int(line["start"][1])],
-                                    "end": [int(line["end"][0]), int(line["end"][1])],
-                                }
-                            )
-                        st.rerun()
+                    # if st.button("Apply AI Lines", use_container_width=True):
+                    #     for line in ai_annotation_suggestions.get("movement_lines", []):
+                    #         st.session_state.approved_ai_lines.append(
+                    #             {
+                    #                 "start": [int(line["start"][0]), int(line["start"][1])],
+                    #                 "end": [int(line["end"][0]), int(line["end"][1])],
+                    #             }
+                    #         )
+                    #     st.rerun()
 
                     if st.session_state.approved_ai_lines:
                         st.caption(f"Approved AI lines: {len(st.session_state.approved_ai_lines)}")

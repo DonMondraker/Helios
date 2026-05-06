@@ -521,6 +521,42 @@ function App({
     selectedObjectId,
   });
 
+  const makeEditorLineFromAi = (
+    line: NonNullable<AiAnnotationSuggestions["movement_lines"]>[number]
+  ): EditorLine => ({
+    id: `line_ai_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    x1: line.start[0],
+    y1: line.start[1],
+    x2: line.end[0],
+    y2: line.end[1],
+  });
+
+  const makeEditorCalloutFromAi = (
+    callout: NonNullable<AiAnnotationSuggestions["callouts"]>[number]
+  ): EditorCallout => ({
+    id: `callout_ai_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    label: callout.label,
+    circleX: callout.circle[0],
+    circleY: callout.circle[1],
+    anchorX: callout.end[0],
+    anchorY: callout.end[1],
+  });
+
+  const approveAiSuggestions = () => {
+    if (!aiSuggestions) return;
+
+    const approvedLines =
+      aiSuggestions.movement_lines?.map(makeEditorLineFromAi) ?? [];
+
+    const approvedCallouts =
+      aiSuggestions.callouts?.map(makeEditorCalloutFromAi) ?? [];
+
+    setLines((previous) => [...previous, ...approvedLines]);
+    setCallouts((previous) => [...previous, ...approvedCallouts]);
+
+    setHideAiSuggestions(true);
+  };
+
   useEffect(() => {
     if (!exportRequestId) return;
     if (lastExportRequestIdRef.current === exportRequestId) return;
@@ -764,6 +800,26 @@ function App({
             </ToolButton>
           </div>
         </div>
+
+        {aiSuggestions &&
+            ((aiSuggestions.movement_lines?.length ?? 0) > 0 ||
+              (aiSuggestions.callouts?.length ?? 0) > 0) && (
+              <div>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+                  AI
+                </div>
+
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={approveAiSuggestions}
+                    className="rounded-lg border px-3 py-2 text-sm font-medium"
+                  >
+                    Approve AI Suggestions
+                  </button>
+                </div>
+              </div>
+            )}
 
         <div>
           <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
