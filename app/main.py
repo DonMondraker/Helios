@@ -1343,7 +1343,7 @@ def main():
 
                 export_base_name = st.text_input(
                     "Base file name",
-                    value=uploaded_file.name.rsplit(".", 1)[0],
+                    value=active_filename.rsplit(".", 1)[0],
                 )
 
                 export_bundle_key = st.selectbox(
@@ -1367,7 +1367,7 @@ def main():
                 if final_image is not None:
                     try:
                         project_state = build_project_state(
-                            uploaded_filename=uploaded_file.name,
+                            uploaded_filename=active_filename,
                             session_state=st.session_state,
                             raw_image=raw_image,
                         )

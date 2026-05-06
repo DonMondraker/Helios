@@ -386,7 +386,7 @@ function App({
   const stageRef = useRef<any>(null);
   const lastExportRequestIdRef = useRef<string | null>(null);
 
-  const hasHydratedInitialStateRef = useRef(false);
+  const hydratedProjectKeyRef = useRef<string | null>(null);
   const isHydratingInitialStateRef = useRef(false);
 
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -563,7 +563,7 @@ function App({
   ]);
 
   useEffect(() => {
-    if (!hasHydratedInitialStateRef.current) return;
+    if (!hydratedProjectKeyRef.current) return;
     if (isHydratingInitialStateRef.current) return;
 
     try {
@@ -583,13 +583,17 @@ function App({
   ]);
 
   useEffect(() => {
-    if (hasHydratedInitialStateRef.current) return;
+    if (!imageSrc) return;
+
+    const activeProjectKey = projectKey ?? "default";
+
+    if (hydratedProjectKeyRef.current === activeProjectKey) return;
 
     isHydratingInitialStateRef.current = true;
 
     let stateToLoad: HeliosEditorState | null = null;
 
-    if (initialState) {
+    if (initialState && Object.keys(initialState).length > 0) {
       stateToLoad = initialState as HeliosEditorState;
     } else {
       try {
@@ -603,26 +607,31 @@ function App({
     }
 
     if (stateToLoad) {
-      if (stateToLoad.lines) setLines(stateToLoad.lines);
-      if (stateToLoad.callouts) setCallouts(stateToLoad.callouts);
-      if (stateToLoad.detailViews) setInsets(stateToLoad.detailViews);
-      if (stateToLoad.insetImages) setInsetImages(stateToLoad.insetImages);
-      if (stateToLoad.focusObjects) setFocusObjects(stateToLoad.focusObjects);
+      setLines(stateToLoad.lines ?? []);
+      setCallouts(stateToLoad.callouts ?? []);
+      setInsets(stateToLoad.detailViews ?? []);
+      setInsetImages(stateToLoad.insetImages ?? []);
 
-      if ("selectedObjectId" in stateToLoad) {
-        setSelectedObjectId(stateToLoad.selectedObjectId ?? null);
+      if (stateToLoad.focusObjects) {
+        setFocusObjects(stateToLoad.focusObjects);
       }
+
+      setSelectedObjectId(stateToLoad.selectedObjectId ?? null);
 
       try {
         localStorage.setItem(editorStorageKey, JSON.stringify(stateToLoad));
-      } catch {
-        // localStorage may fail in some browser/privacy modes
-      }
+      } catch {}
+    } else {
+      setLines([]);
+      setCallouts([]);
+      setInsets([]);
+      setInsetImages([]);
+      setSelectedObjectId(null);
     }
 
-    hasHydratedInitialStateRef.current = true;
+    hydratedProjectKeyRef.current = activeProjectKey;
     isHydratingInitialStateRef.current = false;
-  }, [initialState, editorStorageKey]);
+  }, [imageSrc, projectKey, initialState, editorStorageKey]);
 
   useEffect(() => {
     const updateScale = () => {
