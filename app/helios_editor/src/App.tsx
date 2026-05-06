@@ -14,8 +14,6 @@ import useImage from "use-image";
 
 import sampleImage from "./assets/battD.jpg";
 
-projectKey?: string | null;
-
 type Tool = "select" | "draw" | "callout" | "detail" | "inset" | "focus";
 
 type EditorLine = {
@@ -102,6 +100,7 @@ type HeliosEditorProps = {
   aiSuggestions?: AiAnnotationSuggestions | null;
   pendingInsetAsset?: PendingInsetAsset | null;
   exportRequestId?: string | null;
+  projectKey?: string | null;
 };
 
 type AiAnnotationSuggestions = {
@@ -389,7 +388,6 @@ function App({
 
   const hasHydratedInitialStateRef = useRef(false);
   const isHydratingInitialStateRef = useRef(false);
-  const autoSyncTimeoutRef = useRef<number | null>(null);
 
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
@@ -542,12 +540,14 @@ function App({
 
         setSelectedObjectId(previousSelection);
 
-        Streamlit.setComponentValue({
-          ...getEditorState(),
-          selectedObjectId: previousSelection,
-          exportedImageDataUrl: dataUrl,
-          exportRequestId,
-        });
+        try {
+          Streamlit.setComponentValue({
+            ...getEditorState(),
+            selectedObjectId: previousSelection,
+            exportedImageDataUrl: dataUrl,
+            exportRequestId,
+          });
+        } catch {}
       });
     });
   }, [
@@ -568,13 +568,14 @@ function App({
 
     try {
       localStorage.setItem(
-        EDITOR_STORAGE_KEY,
+        editorStorageKey,
         JSON.stringify(getEditorState())
       );
     } catch {
       // localStorage may fail in some browser/privacy modes
     }
   }, [
+    editorStorageKey,
     lines,
     callouts,
     insets,
@@ -1852,6 +1853,7 @@ function StreamlitAppWrapper() {
       aiSuggestions={args.aiSuggestions}
       pendingInsetAsset={args.pendingInsetAsset}
       exportRequestId={args.exportRequestId}
+      projectKey={args.projectKey}
     />
   );
 }
