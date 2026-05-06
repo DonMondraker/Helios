@@ -295,3 +295,21 @@ def apply_project_state_to_session(state: dict[str, Any], session_state: Any) ->
     session_state["suggestion_extra_details"] = ai.get("suggestion_extra_details", "")
     session_state["camera_preset"] = ai.get("camera_preset")
     session_state["operation_type"] = ai.get("operation_type")
+
+
+def get_source_image_from_project_state(state: dict[str, Any]) -> tuple[str | None, Image.Image | None]:
+    source_image = state.get("source", {}).get("source_image", {})
+    filename = source_image.get("filename") or state.get("source", {}).get("uploaded_filename")
+    data_url = source_image.get("data_url")
+
+    if not data_url:
+        return filename, None
+
+    if "," in data_url:
+        _, encoded = data_url.split(",", 1)
+    else:
+        encoded = data_url
+
+    raw = base64.b64decode(encoded)
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    return filename, image

@@ -748,21 +748,76 @@ def main():
         "background_reduce_grayscale": False,
         "background_reduce_blur": False,
         "background_reduce_desaturate": True,
+        "loaded_project_raw_image": None,
+        "loaded_project_filename": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
     uploaded_file = upload_image()
-    if not uploaded_file:
-        return
 
-    raw_image = Image.open(uploaded_file).convert("RGB")
+    project_state_upload = st.file_uploader(
+        "Load project JSON",
+        type=["json"],
+        key="startup_project_state_upload",
+    )
+
+    if project_state_upload is not None:
+        file_bytes = project_state_upload.read()
+        current_json_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        if st.session_state.last_loaded_project_json_hash != current_json_hash:
+            try:
+                loaded_state = load_project_state_from_bytes(file_bytes)
+
+                source_image = loaded_state.get("source", {}).get("source_image", {})
+                source_data_url = source_image.get("data_url")
+                source_filename = (
+                        source_image.get("filename")
+                        or loaded_state.get("source", {}).get("uploaded_filename")
+                        or "loaded_project.png"
+                )
+
+                if not source_data_url:
+                    st.error("Project JSON does not contain a source image.")
+                    return
+
+                _, encoded = source_data_url.split(",", 1)
+                image_bytes = base64.b64decode(encoded)
+                loaded_raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+                st.session_state.pending_loaded_project_state = loaded_state
+                st.session_state.loaded_project_raw_image = loaded_raw_image
+                st.session_state.loaded_project_filename = source_filename
+                st.session_state.last_loaded_project_json_hash = current_json_hash
+
+                # Important: isolate React localStorage per loaded JSON project
+                st.session_state.editor_project_key = f"project_{current_json_hash[:16]}"
+                st.session_state.react_editor_state = None
+
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Could not load project JSON: {e}")
+                return
+
+    if uploaded_file is not None:
+        raw_image = Image.open(uploaded_file).convert("RGB")
+        active_filename = uploaded_file.name
+
+    elif st.session_state.loaded_project_raw_image is not None:
+        raw_image = st.session_state.loaded_project_raw_image
+        active_filename = st.session_state.loaded_project_filename or "loaded_project.png"
+
+    else:
+        st.info("Upload an image or load a saved project JSON to begin.")
+        return
     normalized_image = normalize_creoview_image(raw_image)
     image = normalized_image
 
-    if st.session_state.last_uploaded_filename != uploaded_file.name:
-        st.session_state.last_uploaded_filename = uploaded_file.name
+    if uploaded_file is not None and st.session_state.last_uploaded_filename != active_filename:
+        st.session_state.last_uploaded_filename = active_filename
         st.session_state.focus_mask = None
         st.session_state.context_mask = None
         st.session_state.result_image = None
@@ -910,26 +965,26 @@ def main():
 
                 st.rerun()
 
-            project_state_upload = st.file_uploader(
-                "Load project JSON",
-                type=["json"],
-                key="project_state_upload",
-            )
-
-            if project_state_upload is not None:
-                file_bytes = project_state_upload.read()
-                current_json_hash = hashlib.sha256(file_bytes).hexdigest()
-
-                if st.session_state.last_loaded_project_json_hash != current_json_hash:
-                    try:
-                        loaded_state = load_project_state_from_bytes(file_bytes)
-                        st.session_state.pending_loaded_project_state = loaded_state
-                        st.session_state.last_loaded_project_json_hash = current_json_hash
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Could not load project state: {e}")
-            else:
-                st.session_state.last_loaded_project_json_hash = None
+            # project_state_upload = st.file_uploader(
+            #     "Load project JSON",
+            #     type=["json"],
+            #     key="project_state_upload",
+            # )
+            #
+            # if project_state_upload is not None:
+            #     file_bytes = project_state_upload.read()
+            #     current_json_hash = hashlib.sha256(file_bytes).hexdigest()
+            #
+            #     if st.session_state.last_loaded_project_json_hash != current_json_hash:
+            #         try:
+            #             loaded_state = load_project_state_from_bytes(file_bytes)
+            #             st.session_state.pending_loaded_project_state = loaded_state
+            #             st.session_state.last_loaded_project_json_hash = current_json_hash
+            #             st.rerun()
+            #         except Exception as e:
+            #             st.error(f"Could not load project state: {e}")
+            # else:
+            #     st.session_state.last_loaded_project_json_hash = None
 
         # -------------------------
         # PHASE 2: RENDER + TOOLS
@@ -1355,7 +1410,7 @@ def main():
                     st.info("Render an illustration first to enable export.")
 
                 project_state = build_project_state(
-                    uploaded_filename=uploaded_file.name if uploaded_file is not None else None,
+                    uploaded_filename=active_filename,
                     session_state=st.session_state,
                     raw_image=raw_image,
                 )
