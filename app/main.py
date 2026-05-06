@@ -563,6 +563,7 @@ def apply_background_detail_mode(
         blur_background: bool = False,
         desaturate_background: bool = False,
         blur_radius: float = 3.5,
+        target_gray: int = 140,
 ) -> Image.Image:
     """
     Applies post-render background control.
@@ -613,26 +614,17 @@ def apply_background_detail_mode(
 
     background_np = np.array(background).astype(np.float32)
 
-    # Softer whitening so grayscale/desaturation remains visible
-    white = np.array(
-        [st.session_state.background_target_gray]*3,
-        dtype=np.float32
+    effective_strength = float(np.clip(reduce_strength, 0.0, 1.0))
+
+    target_gray_value = st.session_state.get("background_target_gray", 140)
+    target_gray = np.array(
+        [target_gray_value, target_gray_value, target_gray_value],
+        dtype=np.float32,
     )
-
-    effective_strength = reduce_strength
-
-    if grayscale_background:
-        effective_strength = min(reduce_strength, 0.45)
-
-    elif desaturate_background:
-        effective_strength = min(reduce_strength, 0.50)
-
-    elif blur_background:
-        effective_strength = min(reduce_strength, 0.55)
 
     softened_np = (
             background_np * (1.0 - effective_strength)
-            + white * effective_strength
+            + target_gray * effective_strength
     )
 
     output = image_np.copy()
@@ -668,6 +660,21 @@ def merge_focus_halo_state(
         )
 
     return merged
+
+
+def combine_masks(*masks: Image.Image | None) -> Image.Image | None:
+    valid_masks = [m.convert("L") for m in masks if m is not None]
+
+    if not valid_masks:
+        return None
+
+    combined = np.zeros_like(np.array(valid_masks[0]), dtype=np.uint8)
+
+    for mask in valid_masks:
+        mask_np = np.array(mask)
+        combined = np.maximum(combined, mask_np)
+
+    return Image.fromarray(combined, mode="L")
 
 
 def main():
@@ -1037,9 +1044,14 @@ def main():
                     ):
                         background_mode = "reduce"
 
+                    protected_mask = combine_masks(
+                        st.session_state.focus_mask,
+                        st.session_state.context_mask,
+                    )
+
                     result = apply_background_detail_mode(
                         image=result,
-                        focus_mask=st.session_state.focus_mask,
+                        focus_mask=protected_mask,
                         mode=background_mode,
                         reduce_strength=st.session_state.get("background_reduce_strength", 0.65),
                         grayscale_background=st.session_state.get("background_reduce_grayscale", False),

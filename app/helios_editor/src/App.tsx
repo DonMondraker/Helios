@@ -125,6 +125,7 @@ const SNAP_ANGLES = [0, 45, 90, 135, 180, -45, -90, -135, -180];
 const HALO_COLOR = "white";
 const ANNOTATION_COLOR = "black";
 const SELECTED_COLOR = "#50ae91";
+const EDITOR_STORAGE_KEY = `helios_editor_draft_v1_${imageSrc?.length ?? 0}`;
 
 function snapEndpoint(
   x1: number,
@@ -559,23 +560,14 @@ function App({
     if (!hasHydratedInitialStateRef.current) return;
     if (isHydratingInitialStateRef.current) return;
 
-    if (autoSyncTimeoutRef.current !== null) {
-      window.clearTimeout(autoSyncTimeoutRef.current);
+    try {
+      localStorage.setItem(
+        EDITOR_STORAGE_KEY,
+        JSON.stringify(getEditorState())
+      );
+    } catch {
+      // localStorage may fail in some browser/privacy modes
     }
-
-    autoSyncTimeoutRef.current = window.setTimeout(() => {
-      try {
-        Streamlit.setComponentValue(getEditorState());
-      } catch {
-        // Running standalone in Vite.
-      }
-    }, 250);
-
-    return () => {
-      if (autoSyncTimeoutRef.current !== null) {
-        window.clearTimeout(autoSyncTimeoutRef.current);
-      }
-    };
   }, [
     lines,
     callouts,
@@ -585,20 +577,59 @@ function App({
     selectedObjectId,
   ]);
 
+//   useEffect(() => {
+//     if (!hasHydratedInitialStateRef.current) return;
+//     if (isHydratingInitialStateRef.current) return;
+//
+//     if (autoSyncTimeoutRef.current !== null) {
+//       window.clearTimeout(autoSyncTimeoutRef.current);
+//     }
+//
+//     autoSyncTimeoutRef.current = window.setTimeout(() => {
+//       try {
+//         Streamlit.setComponentValue(getEditorState());
+//       } catch {
+//         // Running standalone in Vite.
+//       }
+//     }, 250);
+//
+//     return () => {
+//       if (autoSyncTimeoutRef.current !== null) {
+//         window.clearTimeout(autoSyncTimeoutRef.current);
+//       }
+//     };
+//   }, [
+//     lines,
+//     callouts,
+//     insets,
+//     insetImages,
+//     focusObjects,
+//     selectedObjectId,
+//   ]);
+
   useEffect(() => {
     if (hasHydratedInitialStateRef.current) return;
 
     isHydratingInitialStateRef.current = true;
 
-    if (initialState) {
-      if (initialState.lines) setLines(initialState.lines);
-      if (initialState.callouts) setCallouts(initialState.callouts);
-      if (initialState.detailViews) setInsets(initialState.detailViews);
-      if (initialState.insetImages) setInsetImages(initialState.insetImages);
-      if (initialState.focusObjects) setFocusObjects(initialState.focusObjects);
+    let stateToLoad = initialState;
 
-      if ("selectedObjectId" in initialState) {
-        setSelectedObjectId(initialState.selectedObjectId ?? null);
+    try {
+      const saved = localStorage.getItem(EDITOR_STORAGE_KEY);
+      if (saved) {
+        stateToLoad = JSON.parse(saved);
+      }
+    } catch {}
+
+    if (stateToLoad) {
+      if (stateToLoad.lines) setLines(stateToLoad.lines);
+      if (stateToLoad.callouts) setCallouts(stateToLoad.callouts);
+      if (stateToLoad.detailViews) setInsets(stateToLoad.detailViews);
+      if (stateToLoad.insetImages) setInsetImages(stateToLoad.insetImages);
+      if (stateToLoad.focusObjects) setFocusObjects(stateToLoad.focusObjects);
+
+      if ("selectedObjectId" in stateToLoad) {
+        setSelectedObjectId(stateToLoad.selectedObjectId ?? null);
       }
     }
 
