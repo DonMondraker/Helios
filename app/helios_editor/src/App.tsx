@@ -571,58 +571,6 @@ function App({
         editorStorageKey,
         JSON.stringify(getEditorState())
       );
-    } catch {
-      // localStorage may fail in some browser/privacy modes
-    }
-  }, [
-    editorStorageKey,
-    lines,
-    callouts,
-    insets,
-    insetImages,
-    focusObjects,
-    selectedObjectId,
-  ]);
-
-//   useEffect(() => {
-//     if (!hasHydratedInitialStateRef.current) return;
-//     if (isHydratingInitialStateRef.current) return;
-//
-//     if (autoSyncTimeoutRef.current !== null) {
-//       window.clearTimeout(autoSyncTimeoutRef.current);
-//     }
-//
-//     autoSyncTimeoutRef.current = window.setTimeout(() => {
-//       try {
-//         Streamlit.setComponentValue(getEditorState());
-//       } catch {
-//         // Running standalone in Vite.
-//       }
-//     }, 250);
-//
-//     return () => {
-//       if (autoSyncTimeoutRef.current !== null) {
-//         window.clearTimeout(autoSyncTimeoutRef.current);
-//       }
-//     };
-//   }, [
-//     lines,
-//     callouts,
-//     insets,
-//     insetImages,
-//     focusObjects,
-//     selectedObjectId,
-//   ]);
-
-  useEffect(() => {
-    if (!hasHydratedInitialStateRef.current) return;
-    if (isHydratingInitialStateRef.current) return;
-
-    try {
-      localStorage.setItem(
-        editorStorageKey,
-        JSON.stringify(getEditorState())
-      );
     } catch {}
   }, [
     editorStorageKey,
@@ -639,17 +587,19 @@ function App({
 
     isHydratingInitialStateRef.current = true;
 
-    let stateToLoad: Partial<HeliosEditorState> | null | undefined = null;
+    let stateToLoad: HeliosEditorState | null = null;
 
-    try {
-      const saved = localStorage.getItem(editorStorageKey);
-      if (saved) {
-        stateToLoad = JSON.parse(saved);
+    if (initialState) {
+      stateToLoad = initialState as HeliosEditorState;
+    } else {
+      try {
+        const saved = localStorage.getItem(editorStorageKey);
+        if (saved) {
+          stateToLoad = JSON.parse(saved) as HeliosEditorState;
+        }
+      } catch {
+        // Ignore invalid localStorage state
       }
-    } catch {}
-
-    if (!stateToLoad && initialState) {
-      stateToLoad = initialState;
     }
 
     if (stateToLoad) {
@@ -662,13 +612,16 @@ function App({
       if ("selectedObjectId" in stateToLoad) {
         setSelectedObjectId(stateToLoad.selectedObjectId ?? null);
       }
+
+      try {
+        localStorage.setItem(editorStorageKey, JSON.stringify(stateToLoad));
+      } catch {
+        // localStorage may fail in some browser/privacy modes
+      }
     }
 
     hasHydratedInitialStateRef.current = true;
-
-    requestAnimationFrame(() => {
-      isHydratingInitialStateRef.current = false;
-    });
+    isHydratingInitialStateRef.current = false;
   }, [initialState, editorStorageKey]);
 
   useEffect(() => {
