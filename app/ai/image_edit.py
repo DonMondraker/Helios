@@ -1,10 +1,12 @@
 import base64
 import io
 from PIL import Image
-from openai import OpenAI
+# from openai import OpenAI
 from core.prompt_builder import build_prompt
+from ai.client import get_openai_client
 
-client = OpenAI()
+# client = OpenAI()
+client = get_openai_client()
 
 
 def pil_to_bytes(image: Image.Image):

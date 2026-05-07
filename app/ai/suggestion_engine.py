@@ -1,8 +1,8 @@
 import json
 from typing import Any, Dict, Optional
 
-from ai.client import get_client
-
+# from ai.client import get_client
+from ai.client import get_openai_client
 
 def build_suggestion_system_prompt() -> str:
     return """
@@ -123,7 +123,8 @@ def request_ai_suggestions(
         extra_details: str = "",
         model: str = "gpt-5.4-mini",
 ) -> Dict[str, Any]:
-    client = get_client()
+    # client = get_client()
+    client = get_openai_client()
 
     system_prompt = build_suggestion_system_prompt()
     user_prompt = build_suggestion_user_prompt(
