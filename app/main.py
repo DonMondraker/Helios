@@ -1145,18 +1145,36 @@ def main():
                     key="inset_upload",
                 )
 
-                if inset_upload is not None:
-                    if st.button("Process Inset Image", use_container_width=True):
-                        try:
-                            asset_id, asset = _create_inset_asset_from_upload(
-                                inset_upload,
-                                st.session_state,
-                            )
-                            st.session_state.inset_assets[asset_id] = asset
-                            st.session_state.pending_inset_asset_id = asset_id
-                            st.success("Inset processed. Select Inset tool and click the image to place it.")
-                        except Exception as e:
-                            st.error(f"Inset processing error: {e}")
+                process_inset_clicked = st.button(
+                    "Process Inset Image",
+                    use_container_width=True,
+                    disabled=inset_upload is None,
+                )
+
+                if process_inset_clicked:
+                    try:
+                        asset_id, asset = _create_inset_asset_from_upload(
+                            inset_upload,
+                            st.session_state,
+                        )
+                        st.session_state.inset_assets[asset_id] = asset
+                        st.session_state.pending_inset_asset_id = asset_id
+                        st.success("Inset processed. Select Inset tool and click the image to place it.")
+                    except Exception as e:
+                        st.error(f"Inset processing error: {e}")
+
+                # if inset_upload is not None:
+                #     if st.button("Process Inset Image", use_container_width=True):
+                #         try:
+                #             asset_id, asset = _create_inset_asset_from_upload(
+                #                 inset_upload,
+                #                 st.session_state,
+                #             )
+                #             st.session_state.inset_assets[asset_id] = asset
+                #             st.session_state.pending_inset_asset_id = asset_id
+                #             st.success("Inset processed. Select Inset tool and click the image to place it.")
+                #         except Exception as e:
+                #             st.error(f"Inset processing error: {e}")
 
                 if st.session_state.get("pending_inset_asset_id"):
                     pending_asset = st.session_state.inset_assets.get(st.session_state.pending_inset_asset_id)
