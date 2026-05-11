@@ -916,6 +916,32 @@ def main():
                 enhance_focus=st.session_state.get("enhance_focus", True),
                 enhance_contour=st.session_state.get("enhance_contour", True),
             )
+
+            background_mode = "normal"
+
+            if st.session_state.get("remove_background_details"):
+                background_mode = "remove"
+            elif (
+                    st.session_state.get("reduce_background_details")
+                    and not st.session_state.get("remove_background_details")
+            ):
+                background_mode = "reduce"
+
+            protected_mask = combine_masks(
+                st.session_state.focus_mask,
+                st.session_state.context_mask,
+            )
+
+            rebuilt_result = apply_background_detail_mode(
+                image=rebuilt_result,
+                focus_mask=protected_mask,
+                mode=background_mode,
+                reduce_strength=st.session_state.get("background_reduce_strength", 0.65),
+                grayscale_background=st.session_state.get("background_reduce_grayscale", False),
+                blur_background=st.session_state.get("background_reduce_blur", False),
+                desaturate_background=st.session_state.get("background_reduce_desaturate", False),
+            )
+
             st.session_state.result_image = rebuilt_result
             st.session_state.final_result_image = rebuilt_result
             st.session_state.auto_rebuild_after_load = False

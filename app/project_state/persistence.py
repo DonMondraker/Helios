@@ -268,14 +268,14 @@ def load_project_state_from_bytes(data: bytes) -> dict[str, Any]:
 
 
 def apply_project_state_to_session(state: dict[str, Any], session_state: Any) -> None:
-    workflow = state.get("workflow", {})
-    mask_settings = state.get("mask_settings", {})
-    render_settings = state.get("render_settings", {})
-    masks = state.get("masks", {})
     render_settings = state.get("render_settings", {})
 
     for key, value in render_settings.items():
         session_state[key] = value
+    workflow = state.get("workflow", {})
+    mask_settings = state.get("mask_settings", {})
+    render_settings = state.get("render_settings", {})
+    masks = state.get("masks", {})
     annotations = state.get("annotations", {})
     if annotations.get("react_editor_state") is not None:
         session_state["react_editor_state"] = annotations["react_editor_state"]
