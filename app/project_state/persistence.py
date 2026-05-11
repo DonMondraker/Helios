@@ -214,9 +214,24 @@ def build_project_state(
             "min_value": session_state.get("min_value", 20),
         },
         "render_settings": {
-            "background_threshold": session_state.get("background_threshold", 210),
-            "enhance_focus": bool(session_state.get("enhance_focus", True)),
-            "enhance_contour": bool(session_state.get("enhance_contour", True)),
+            "hue_tolerance": session_state.get("hue_tolerance", 18),
+            "min_saturation": session_state.get("min_saturation", 45),
+            "min_value": session_state.get("min_value", 20),
+
+            "background_threshold": session_state.get("background_threshold", 180),
+            "enhance_focus": session_state.get("enhance_focus", True),
+            "enhance_contour": session_state.get("enhance_contour", True),
+
+            "remove_background_details": session_state.get("remove_background_details", False),
+            "reduce_background_details": session_state.get("reduce_background_details", False),
+            "background_reduce_strength": session_state.get("background_reduce_strength", 0.45),
+            "background_reduce_blur": session_state.get("background_reduce_blur", False),
+            "background_reduce_desaturate": session_state.get("background_reduce_desaturate", True),
+            "background_reduce_grayscale": session_state.get("background_reduce_grayscale", False),
+            "background_target_gray": session_state.get("background_target_gray", 140),
+
+            "camera_preset": session_state.get("camera_preset", "TRUCK_ISO1"),
+            "operation_type": session_state.get("operation_type", "Remove"),
         },
         "masks": {
             "focus_mask": _mask_to_list(session_state.get("focus_mask")),
@@ -257,6 +272,10 @@ def apply_project_state_to_session(state: dict[str, Any], session_state: Any) ->
     mask_settings = state.get("mask_settings", {})
     render_settings = state.get("render_settings", {})
     masks = state.get("masks", {})
+    render_settings = state.get("render_settings", {})
+
+    for key, value in render_settings.items():
+        session_state[key] = value
     annotations = state.get("annotations", {})
     if annotations.get("react_editor_state") is not None:
         session_state["react_editor_state"] = annotations["react_editor_state"]
