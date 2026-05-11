@@ -758,7 +758,7 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = value
 
-    st.markdown("### Start Project")
+    # st.markdown("### Start Project")
 
     upload_col, json_col = st.columns(2)
 
