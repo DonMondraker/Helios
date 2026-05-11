@@ -710,6 +710,9 @@ def main():
         "callout_canvas_version": 0,
         "mask_step_completed": False,
         "last_uploaded_filename": None,
+        "uploaded_image_bytes": None,
+        "uploaded_image_filename": None,
+        "last_uploaded_image_hash": None,
         "ai_notes": [],
         "ai_strategy": None,
         "ai_annotation_suggestions": None,
@@ -755,16 +758,47 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = value
 
-    uploaded_file = upload_image()
+    st.markdown("### Start Project")
 
-    project_state_upload = st.file_uploader(
-        "Load project JSON",
-        type=["json"],
-        key="startup_project_state_upload",
-    )
+    upload_col, json_col = st.columns(2)
+
+    with upload_col:
+        uploaded_file = st.file_uploader(
+            "Upload image",
+            type=["png", "jpg", "jpeg"],
+            key="startup_image_upload",
+        )
+
+    with json_col:
+        project_state_upload = st.file_uploader(
+            "Load project JSON",
+            type=["json"],
+            key="startup_project_state_upload",
+        )
+
+    if uploaded_file is not None:
+        image_bytes = uploaded_file.getvalue()
+        current_image_hash = hashlib.sha256(image_bytes).hexdigest()
+
+        if st.session_state.last_uploaded_image_hash != current_image_hash:
+            st.session_state.uploaded_image_bytes = image_bytes
+            st.session_state.uploaded_image_filename = uploaded_file.name
+            st.session_state.last_uploaded_image_hash = current_image_hash
+
+            # Clear JSON-loaded project source
+            st.session_state.loaded_project_raw_image = None
+            st.session_state.loaded_project_filename = None
+            st.session_state.pending_loaded_project_state = None
+            st.session_state.last_loaded_project_json_hash = None
+
+            # New image = new editor project
+            st.session_state.editor_project_key = f"image_{current_image_hash[:16]}"
+            st.session_state.react_editor_state = None
+
+            st.rerun()
 
     if project_state_upload is not None:
-        file_bytes = project_state_upload.read()
+        file_bytes = project_state_upload.getvalue()
         current_json_hash = hashlib.sha256(file_bytes).hexdigest()
 
         if st.session_state.last_loaded_project_json_hash != current_json_hash:
@@ -802,13 +836,15 @@ def main():
                 st.error(f"Could not load project JSON: {e}")
                 return
 
-    if uploaded_file is not None:
-        raw_image = Image.open(uploaded_file).convert("RGB")
-        active_filename = uploaded_file.name
-
-    elif st.session_state.loaded_project_raw_image is not None:
+    if st.session_state.loaded_project_raw_image is not None:
         raw_image = st.session_state.loaded_project_raw_image
         active_filename = st.session_state.loaded_project_filename or "loaded_project.png"
+        uploaded_file = None
+
+    elif st.session_state.uploaded_image_bytes is not None:
+        raw_image = Image.open(BytesIO(st.session_state.uploaded_image_bytes)).convert("RGB")
+        active_filename = st.session_state.uploaded_image_filename or "uploaded_image.png"
+        uploaded_file = None
 
     else:
         # st.info("Upload an image or load a saved project JSON to begin.")
@@ -816,7 +852,11 @@ def main():
     normalized_image = normalize_creoview_image(raw_image)
     image = normalized_image
 
-    if uploaded_file is not None and st.session_state.last_uploaded_filename != active_filename:
+    if (
+            st.session_state.uploaded_image_bytes is not None
+            and st.session_state.loaded_project_raw_image is None
+            and st.session_state.last_uploaded_filename != active_filename
+    ):
         st.session_state.last_uploaded_filename = active_filename
         st.session_state.focus_mask = None
         st.session_state.context_mask = None
@@ -964,27 +1004,6 @@ def main():
                 st.session_state.sidebar_section = "Render"
 
                 st.rerun()
-
-            # project_state_upload = st.file_uploader(
-            #     "Load project JSON",
-            #     type=["json"],
-            #     key="project_state_upload",
-            # )
-            #
-            # if project_state_upload is not None:
-            #     file_bytes = project_state_upload.read()
-            #     current_json_hash = hashlib.sha256(file_bytes).hexdigest()
-            #
-            #     if st.session_state.last_loaded_project_json_hash != current_json_hash:
-            #         try:
-            #             loaded_state = load_project_state_from_bytes(file_bytes)
-            #             st.session_state.pending_loaded_project_state = loaded_state
-            #             st.session_state.last_loaded_project_json_hash = current_json_hash
-            #             st.rerun()
-            #         except Exception as e:
-            #             st.error(f"Could not load project state: {e}")
-            # else:
-            #     st.session_state.last_loaded_project_json_hash = None
 
         # -------------------------
         # PHASE 2: RENDER + TOOLS
