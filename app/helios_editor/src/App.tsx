@@ -5,6 +5,7 @@ import {
   Layer,
   Image as KonvaImage,
   Line,
+  Arrow,
   Circle,
   Text,
   Rect,
@@ -14,7 +15,7 @@ import useImage from "use-image";
 
 import sampleImage from "./assets/battD.jpg";
 
-type Tool = "select" | "draw" | "callout" | "detail" | "inset" | "focus";
+type Tool = "select" | "draw" | "arrow" | "callout" | "detail" | "inset" | "overlay" | "focus";
 
 type EditorLine = {
   id: string;
@@ -23,6 +24,7 @@ type EditorLine = {
   y1: number;
   x2: number;
   y2: number;
+  arrowEnd?: boolean;
 };
 
 type EditorCallout = {
@@ -187,7 +189,7 @@ function InsetImageObject({
           <Line
             points={[inset.leaderAnchorX, inset.leaderAnchorY, insetCenterX, insetCenterY]}
             stroke={HALO_COLOR}
-            strokeWidth={s(isSelected ? 10 : 8)}
+            strokeWidth={s(isSelected ? 14 : 12)}
             lineCap="round"
             lineJoin="round"
             listening={false}
@@ -195,7 +197,7 @@ function InsetImageObject({
           <Line
             points={[inset.leaderAnchorX, inset.leaderAnchorY, insetCenterX, insetCenterY]}
             stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-            strokeWidth={s(isSelected ? 4 : 3)}
+            strokeWidth={s(isSelected ? 6 : 5)}
             lineCap="round"
             lineJoin="round"
           />
@@ -226,7 +228,7 @@ function InsetImageObject({
           width={inset.width}
           height={inset.height}
           stroke={HALO_COLOR}
-          strokeWidth={s(8)}
+          strokeWidth={s(14)}
           listening={false}
         />
 
@@ -234,7 +236,7 @@ function InsetImageObject({
           width={inset.width}
           height={inset.height}
           stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-          strokeWidth={s(isSelected ? 4 : 2)}
+          strokeWidth={s(isSelected ? 6 : 4)}
         />
       </Group>
 
@@ -247,7 +249,7 @@ function InsetImageObject({
             height={16}
             fill={SELECTED_COLOR}
             stroke="white"
-            strokeWidth={2}
+            strokeWidth={5}
             cornerRadius={3}
             draggable
             onMouseDown={(e) => {
@@ -277,7 +279,7 @@ function InsetImageObject({
             radius={s(7)}
             fill={SELECTED_COLOR}
             stroke="white"
-            strokeWidth={2}
+            strokeWidth={5}
             draggable
             onMouseDown={(e) => {
               e.cancelBubble = true;
@@ -722,6 +724,7 @@ function App({
       if (event.key.toLowerCase() === "i") setTool("inset");
       if (event.key.toLowerCase() === "v") setTool("detail");
       if (event.key.toLowerCase() === "f") setTool("focus");
+      if (event.key.toLowerCase() === "a") setTool("arrow");
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -784,6 +787,10 @@ function App({
 
             <ToolButton active={tool === "callout"} onClick={() => setTool("callout")}>
               Callout (C)
+            </ToolButton>
+
+            <ToolButton active={tool === "arrow"} onClick={() => setTool("arrow")}>
+              Arrow (A)
             </ToolButton>
           </div>
         </div>
@@ -937,7 +944,7 @@ function App({
                   return;
                 }
 
-                if (tool === "draw" && clickedOnCanvas) {
+                if ((tool === "draw" || tool === "arrow") && clickedOnCanvas) {
                   const newLine: EditorLine = {
                     id: `line_${Date.now()}`,
                     name: getNextLineName(),
@@ -945,6 +952,7 @@ function App({
                     y1: pointer.y,
                     x2: pointer.x,
                     y2: pointer.y,
+                    arrowEnd: tool === "arrow",
                   };
 
                   setLines((prev) => [...prev, newLine]);
@@ -996,7 +1004,7 @@ function App({
                     <Line
                       points={[line.start[0], line.start[1], line.end[0], line.end[1]]}
                       stroke={HALO_COLOR}
-                      strokeWidth={7}
+                      strokeWidth={14}
                       lineCap="round"
                       lineJoin="round"
                       opacity={0.7}
@@ -1005,7 +1013,7 @@ function App({
                     <Line
                       points={[line.start[0], line.start[1], line.end[0], line.end[1]]}
                       stroke="#777"
-                      strokeWidth={2}
+                      strokeWidth={5}
                       dash={[s(8), s(6)]}
                       lineCap="round"
                       lineJoin="round"
@@ -1025,7 +1033,7 @@ function App({
                         callout.end[1],
                       ]}
                       stroke={HALO_COLOR}
-                      strokeWidth={7}
+                      strokeWidth={11}
                       lineCap="round"
                       lineJoin="round"
                       opacity={0.7}
@@ -1040,7 +1048,7 @@ function App({
                         callout.end[1],
                       ]}
                       stroke="#777"
-                      strokeWidth={2}
+                      strokeWidth={5}
                       dash={[s(8), s(6)]}
                       lineCap="round"
                       lineJoin="round"
@@ -1051,10 +1059,10 @@ function App({
                     <Circle
                       x={callout.circle[0]}
                       y={callout.circle[1]}
-                      radius={s(18)}
+                      radius={s(22)}
                       fill="white"
                       stroke="#777"
-                      strokeWidth={2}
+                      strokeWidth={5}
                       dash={[6, 4]}
                       opacity={0.9}
                       listening={false}
@@ -1085,7 +1093,7 @@ function App({
                             points={points}
                             closed
                             stroke={HALO_COLOR}
-                            strokeWidth={3} // slightly thinner
+                            strokeWidth={s(4)}
                             lineJoin="round"
                             lineCap="round"
                             opacity={0.95}
@@ -1095,12 +1103,12 @@ function App({
                             points={points}
                             closed
                             stroke={HALO_COLOR}
-                            strokeWidth={2}
+                            strokeWidth={s(4)}
                             lineJoin="round"
                             lineCap="round"
-                            opacity={0.35}        // softer
+                            opacity={0.25}
                             shadowColor={HALO_COLOR}
-                            shadowBlur={10}      // stronger outward glow
+                            shadowBlur={s(4)}
                             shadowOffsetX={0}
                             shadowOffsetY={0}
                             listening={false}
@@ -1113,7 +1121,7 @@ function App({
                           points={points}
                           closed
                           stroke={isSelected ? SELECTED_COLOR : "#ffffff"}
-                          strokeWidth={s(isSelected ? 4 : 2)}
+                          strokeWidth={s(isSelected ? 6 : 4)}
                           dash={isSelected ? undefined : [8, 6]}
                           lineJoin="round"
                           lineCap="round"
@@ -1146,7 +1154,7 @@ function App({
                           <Line
                             points={[inset.leaderAnchorX, inset.leaderAnchorY, insetCenterX, insetCenterY]}
                             stroke={HALO_COLOR}
-                            strokeWidth={s(isSelected ? 10 : 8)}
+                            strokeWidth={s(isSelected ? 14 : 12)}
                             lineCap="round"
                             lineJoin="round"
                             listening={false}
@@ -1155,7 +1163,7 @@ function App({
                           <Line
                             points={[inset.leaderAnchorX, inset.leaderAnchorY, insetCenterX, insetCenterY]}
                             stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-                            strokeWidth={s(isSelected ? 4 : 3)}
+                            strokeWidth={s(isSelected ? 6 : 5)}
                             lineCap="round"
                             lineJoin="round"
                             listening={false}
@@ -1171,7 +1179,7 @@ function App({
                             width={inset.sourceWidth}
                             height={inset.sourceHeight}
                             stroke={HALO_COLOR}
-                            strokeWidth={s(8)}
+                            strokeWidth={s(14)}
                             dash={[10, 6]}
                             listening={false}
                           />
@@ -1181,7 +1189,7 @@ function App({
                             width={inset.sourceWidth}
                             height={inset.sourceHeight}
                             stroke={SELECTED_COLOR}
-                            strokeWidth={2}
+                            strokeWidth={5}
                             dash={[10, 6]}
                             listening={false}
                           />
@@ -1194,7 +1202,7 @@ function App({
                           radius={s(7)}
                           fill={SELECTED_COLOR}
                           stroke="white"
-                          strokeWidth={2}
+                          strokeWidth={5}
                           draggable
                           onMouseDown={(e) => {
                             e.cancelBubble = true;
@@ -1248,48 +1256,101 @@ function App({
 
                   return (
                     <React.Fragment key={line.id}>
-                      <Line
-                        points={[line.x1, line.y1, line.x2, line.y2]}
-                        stroke={HALO_COLOR}
-                        strokeWidth={s(isSelected ? 10 : 8)}
-                        lineCap="round"
-                        lineJoin="round"
-                        listening={false}
-                      />
+                      {line.arrowEnd ? (
+                        <Arrow
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={HALO_COLOR}
+                          fill={HALO_COLOR}
+                          strokeWidth={s(isSelected ? 14 : 12)}
+                          pointerLength={s(18)}
+                          pointerWidth={s(20)}
+                          lineCap="round"
+                          lineJoin="round"
+                          listening={false}
+                        />
+                      ) : (
+                        <Line
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={HALO_COLOR}
+                          strokeWidth={s(isSelected ? 14 : 12)}
+                          lineCap="round"
+                          lineJoin="round"
+                          listening={false}
+                        />
+                      )}
 
-                      <Line
-                        points={[line.x1, line.y1, line.x2, line.y2]}
-                        stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-                        strokeWidth={s(isSelected ? 4 : 3)}
-                        lineCap="round"
-                        lineJoin="round"
-                        hitStrokeWidth={16}
-                        draggable={tool === "select"}
-                        onMouseDown={(e) => {
-                          e.cancelBubble = true;
-                          setSelectedObjectId(line.id);
-                        }}
-                        onDragEnd={(e) => {
-                          const dx = e.target.x();
-                          const dy = e.target.y();
+                      {line.arrowEnd ? (
+                        <Arrow
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
+                          fill={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
+                          strokeWidth={s(isSelected ? 6 : 5)}
+                          pointerLength={s(18)}
+                          pointerWidth={s(18)}
+                          lineCap="round"
+                          lineJoin="round"
+                          hitStrokeWidth={16}
+                          draggable={tool === "select"}
+                          onMouseDown={(e) => {
+                            e.cancelBubble = true;
+                            setSelectedObjectId(line.id);
+                          }}
+                          onDragEnd={(e) => {
+                            const dx = e.target.x();
+                            const dy = e.target.y();
 
-                          setLines((current) =>
-                            current.map((existingLine) =>
-                              existingLine.id === line.id
-                                ? {
-                                    ...existingLine,
-                                    x1: existingLine.x1 + dx,
-                                    y1: existingLine.y1 + dy,
-                                    x2: existingLine.x2 + dx,
-                                    y2: existingLine.y2 + dy,
-                                  }
-                                : existingLine
-                            )
-                          );
+                            setLines((current) =>
+                              current.map((existingLine) =>
+                                existingLine.id === line.id
+                                  ? {
+                                      ...existingLine,
+                                      x1: existingLine.x1 + dx,
+                                      y1: existingLine.y1 + dy,
+                                      x2: existingLine.x2 + dx,
+                                      y2: existingLine.y2 + dy,
+                                    }
+                                  : existingLine
+                              )
+                            );
 
-                          e.target.position({ x: 0, y: 0 });
-                        }}
-                      />
+                            e.target.position({ x: 0, y: 0 });
+                          }}
+                        />
+                      ) : (
+                        <Line
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
+                          strokeWidth={s(isSelected ? 6 : 5)}
+                          lineCap="round"
+                          lineJoin="round"
+                          hitStrokeWidth={16}
+                          draggable={tool === "select"}
+                          onMouseDown={(e) => {
+                            e.cancelBubble = true;
+                            setSelectedObjectId(line.id);
+                          }}
+                          onDragEnd={(e) => {
+                            const dx = e.target.x();
+                            const dy = e.target.y();
+
+                            setLines((current) =>
+                              current.map((existingLine) =>
+                                existingLine.id === line.id
+                                  ? {
+                                      ...existingLine,
+                                      x1: existingLine.x1 + dx,
+                                      y1: existingLine.y1 + dy,
+                                      x2: existingLine.x2 + dx,
+                                      y2: existingLine.y2 + dy,
+                                    }
+                                  : existingLine
+                              )
+                            );
+
+                            e.target.position({ x: 0, y: 0 });
+                          }}
+                        />
+                      )}
 
                       {isSelected && tool === "select" && (
                         <>
@@ -1302,7 +1363,7 @@ function App({
                                 radius={s(7)}
                                 fill={SELECTED_COLOR}
                                 stroke="white"
-                                strokeWidth={2}
+                                strokeWidth={5}
                                 draggable
                                 onMouseDown={(e) => {
                                   e.cancelBubble = true;
@@ -1365,7 +1426,7 @@ function App({
                           callout.anchorY,
                         ]}
                         stroke={HALO_COLOR}
-                        strokeWidth={s(8)}
+                        strokeWidth={s(12)}
                         lineCap="round"
                         lineJoin="round"
                         listening={false}
@@ -1379,7 +1440,7 @@ function App({
                           callout.anchorY,
                         ]}
                         stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-                        strokeWidth={s(3)}
+                        strokeWidth={s(5)}
                         hitStrokeWidth={s(16)}
                         onMouseDown={(e) => {
                           e.cancelBubble = true;
@@ -1390,7 +1451,7 @@ function App({
                       <Circle
                         x={callout.circleX}
                         y={callout.circleY}
-                        radius={s(22)}
+                        radius={s(28)}
                         fill={HALO_COLOR}
                         listening={false}
                       />
@@ -1398,10 +1459,10 @@ function App({
                       <Circle
                         x={callout.circleX}
                         y={callout.circleY}
-                        radius={s(18)}
+                        radius={s(22)}
                         fill="white"
                         stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-                        strokeWidth={s(isSelected ? 3 : 2)}
+                        strokeWidth={s(isSelected ? 5 : 4)}
                         draggable={tool === "select"}
                         onMouseDown={(e) => {
                           e.cancelBubble = true;
@@ -1515,7 +1576,7 @@ function App({
                           width={inset.width}
                           height={inset.height}
                           stroke={HALO_COLOR}
-                          strokeWidth={s(8)}
+                          strokeWidth={s(14)}
                           listening={false}
                         />
 
@@ -1523,7 +1584,7 @@ function App({
                           width={inset.width}
                           height={inset.height}
                           stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-                          strokeWidth={s(isSelected ? 4 : 2)}
+                          strokeWidth={s(isSelected ? 6 : 4)}
                         />
 
                       </Group>
@@ -1536,7 +1597,7 @@ function App({
                           height={16}
                           fill={SELECTED_COLOR}
                           stroke="white"
-                          strokeWidth={2}
+                          strokeWidth={5}
                           cornerRadius={3}
                           draggable
                           onMouseDown={(e) => {

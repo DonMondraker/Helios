@@ -3,6 +3,24 @@ import cv2
 from PIL import Image
 
 
+def _keep_weak_regions_connected_to_strong(
+        strong_mask: np.ndarray,
+        weak_mask: np.ndarray,
+        dilation_iterations: int = 2,
+) -> np.ndarray:
+    strong = (strong_mask > 0).astype(np.uint8)
+    weak = (weak_mask > 0).astype(np.uint8)
+
+    kernel = np.ones((3, 3), np.uint8)
+    grown_strong = cv2.dilate(strong, kernel, iterations=dilation_iterations)
+
+    connected_weak = ((weak == 1) & (grown_strong == 1)).astype(np.uint8)
+
+    combined = np.maximum(strong, connected_weak)
+
+    return (combined * 255).astype(np.uint8)
+
+
 def _clean_binary_mask(mask_np: np.ndarray) -> np.ndarray:
     """
     Internal helper to clean a binary mask.
@@ -115,19 +133,22 @@ def create_color_mask(
 
 def clean_mask(mask: Image.Image):
     """
-    Clean binary mask to remove noise and fill gaps.
+    Clean focus mask while preserving internal openings and thin detail.
+
+    This is a rollback-safe version:
+    - keeps stable morphology
+    - avoids aggressive edge expansion
+    - avoids filling external contours into solid blobs
     """
     mask_np = np.array(mask.convert("L"))
     mask_np = (mask_np > 0).astype(np.uint8) * 255
 
-    kernel = np.ones((5, 5), np.uint8)
+    kernel = np.ones((3, 3), np.uint8)
     mask_np = cv2.morphologyEx(mask_np, cv2.MORPH_CLOSE, kernel)
-    mask_np = cv2.morphologyEx(mask_np, cv2.MORPH_OPEN, kernel)
 
-    contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(mask_np, contours, -1, 255, thickness=cv2.FILLED)
+    mask_np = remove_small_components_np(mask_np, min_area=20)
 
-    return Image.fromarray(mask_np)
+    return Image.fromarray(mask_np, mode="L")
 
 
 def remove_small_components_np(mask_np: np.ndarray, min_area: int = 20) -> np.ndarray:

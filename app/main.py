@@ -81,9 +81,9 @@ def _create_inset_asset_from_upload(uploaded_file, session_state) -> tuple[str, 
     )
     inset_context_mask = clean_context_mask(
         inset_context_mask,
-        open_kernel=3,
-        close_kernel=0,
-        min_component_area=20,
+        open_kernel=0,
+        close_kernel=2,
+        min_component_area=8,
     )
 
     inset_focus_mask = subtract_context_supported_regions_from_focus(
@@ -985,9 +985,9 @@ def main():
                 )
                 context_mask = clean_context_mask(
                     context_mask,
-                    open_kernel=3,
-                    close_kernel=0,
-                    min_component_area=20,
+                    open_kernel=0,
+                    close_kernel=2,
+                    min_component_area=8,
                 )
 
                 focus_mask = subtract_context_supported_regions_from_focus(
