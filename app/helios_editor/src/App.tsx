@@ -5,6 +5,7 @@ import {
   Layer,
   Image as KonvaImage,
   Line,
+  Arrow,
   Circle,
   Text,
   Rect,
@@ -14,7 +15,7 @@ import useImage from "use-image";
 
 import sampleImage from "./assets/battD.jpg";
 
-type Tool = "select" | "draw" | "callout" | "detail" | "inset" | "focus";
+type Tool = "select" | "draw" | "arrow" | "callout" | "detail" | "inset" | "overlay" | "focus";
 
 type EditorLine = {
   id: string;
@@ -23,6 +24,7 @@ type EditorLine = {
   y1: number;
   x2: number;
   y2: number;
+  arrowEnd?: boolean;
 };
 
 type EditorCallout = {
@@ -722,6 +724,7 @@ function App({
       if (event.key.toLowerCase() === "i") setTool("inset");
       if (event.key.toLowerCase() === "v") setTool("detail");
       if (event.key.toLowerCase() === "f") setTool("focus");
+      if (event.key.toLowerCase() === "a") setTool("arrow");
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -784,6 +787,10 @@ function App({
 
             <ToolButton active={tool === "callout"} onClick={() => setTool("callout")}>
               Callout (C)
+            </ToolButton>
+
+            <ToolButton active={tool === "arrow"} onClick={() => setTool("arrow")}>
+              Arrow (A)
             </ToolButton>
           </div>
         </div>
@@ -937,7 +944,7 @@ function App({
                   return;
                 }
 
-                if (tool === "draw" && clickedOnCanvas) {
+                if ((tool === "draw" || tool === "arrow") && clickedOnCanvas) {
                   const newLine: EditorLine = {
                     id: `line_${Date.now()}`,
                     name: getNextLineName(),
@@ -945,6 +952,7 @@ function App({
                     y1: pointer.y,
                     x2: pointer.x,
                     y2: pointer.y,
+                    arrowEnd: tool === "arrow",
                   };
 
                   setLines((prev) => [...prev, newLine]);
@@ -1085,7 +1093,7 @@ function App({
                             points={points}
                             closed
                             stroke={HALO_COLOR}
-                            strokeWidth={5} // slightly thinner
+                            strokeWidth={s(4)}
                             lineJoin="round"
                             lineCap="round"
                             opacity={0.95}
@@ -1095,12 +1103,12 @@ function App({
                             points={points}
                             closed
                             stroke={HALO_COLOR}
-                            strokeWidth={5}
+                            strokeWidth={s(4)}
                             lineJoin="round"
                             lineCap="round"
-                            opacity={0.35}        // softer
+                            opacity={0.25}
                             shadowColor={HALO_COLOR}
-                            shadowBlur={10}      // stronger outward glow
+                            shadowBlur={s(4)}
                             shadowOffsetX={0}
                             shadowOffsetY={0}
                             listening={false}
@@ -1248,48 +1256,101 @@ function App({
 
                   return (
                     <React.Fragment key={line.id}>
-                      <Line
-                        points={[line.x1, line.y1, line.x2, line.y2]}
-                        stroke={HALO_COLOR}
-                        strokeWidth={s(isSelected ? 14 : 12)}
-                        lineCap="round"
-                        lineJoin="round"
-                        listening={false}
-                      />
+                      {line.arrowEnd ? (
+                        <Arrow
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={HALO_COLOR}
+                          fill={HALO_COLOR}
+                          strokeWidth={s(isSelected ? 14 : 12)}
+                          pointerLength={s(18)}
+                          pointerWidth={s(20)}
+                          lineCap="round"
+                          lineJoin="round"
+                          listening={false}
+                        />
+                      ) : (
+                        <Line
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={HALO_COLOR}
+                          strokeWidth={s(isSelected ? 14 : 12)}
+                          lineCap="round"
+                          lineJoin="round"
+                          listening={false}
+                        />
+                      )}
 
-                      <Line
-                        points={[line.x1, line.y1, line.x2, line.y2]}
-                        stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
-                        strokeWidth={s(isSelected ? 6 : 5)}
-                        lineCap="round"
-                        lineJoin="round"
-                        hitStrokeWidth={16}
-                        draggable={tool === "select"}
-                        onMouseDown={(e) => {
-                          e.cancelBubble = true;
-                          setSelectedObjectId(line.id);
-                        }}
-                        onDragEnd={(e) => {
-                          const dx = e.target.x();
-                          const dy = e.target.y();
+                      {line.arrowEnd ? (
+                        <Arrow
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
+                          fill={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
+                          strokeWidth={s(isSelected ? 6 : 5)}
+                          pointerLength={s(18)}
+                          pointerWidth={s(18)}
+                          lineCap="round"
+                          lineJoin="round"
+                          hitStrokeWidth={16}
+                          draggable={tool === "select"}
+                          onMouseDown={(e) => {
+                            e.cancelBubble = true;
+                            setSelectedObjectId(line.id);
+                          }}
+                          onDragEnd={(e) => {
+                            const dx = e.target.x();
+                            const dy = e.target.y();
 
-                          setLines((current) =>
-                            current.map((existingLine) =>
-                              existingLine.id === line.id
-                                ? {
-                                    ...existingLine,
-                                    x1: existingLine.x1 + dx,
-                                    y1: existingLine.y1 + dy,
-                                    x2: existingLine.x2 + dx,
-                                    y2: existingLine.y2 + dy,
-                                  }
-                                : existingLine
-                            )
-                          );
+                            setLines((current) =>
+                              current.map((existingLine) =>
+                                existingLine.id === line.id
+                                  ? {
+                                      ...existingLine,
+                                      x1: existingLine.x1 + dx,
+                                      y1: existingLine.y1 + dy,
+                                      x2: existingLine.x2 + dx,
+                                      y2: existingLine.y2 + dy,
+                                    }
+                                  : existingLine
+                              )
+                            );
 
-                          e.target.position({ x: 0, y: 0 });
-                        }}
-                      />
+                            e.target.position({ x: 0, y: 0 });
+                          }}
+                        />
+                      ) : (
+                        <Line
+                          points={[line.x1, line.y1, line.x2, line.y2]}
+                          stroke={isSelected ? SELECTED_COLOR : ANNOTATION_COLOR}
+                          strokeWidth={s(isSelected ? 6 : 5)}
+                          lineCap="round"
+                          lineJoin="round"
+                          hitStrokeWidth={16}
+                          draggable={tool === "select"}
+                          onMouseDown={(e) => {
+                            e.cancelBubble = true;
+                            setSelectedObjectId(line.id);
+                          }}
+                          onDragEnd={(e) => {
+                            const dx = e.target.x();
+                            const dy = e.target.y();
+
+                            setLines((current) =>
+                              current.map((existingLine) =>
+                                existingLine.id === line.id
+                                  ? {
+                                      ...existingLine,
+                                      x1: existingLine.x1 + dx,
+                                      y1: existingLine.y1 + dy,
+                                      x2: existingLine.x2 + dx,
+                                      y2: existingLine.y2 + dy,
+                                    }
+                                  : existingLine
+                              )
+                            );
+
+                            e.target.position({ x: 0, y: 0 });
+                          }}
+                        />
+                      )}
 
                       {isSelected && tool === "select" && (
                         <>
