@@ -87,6 +87,7 @@ type HeliosEditorState = {
   detailViews: EditorInset[];
   insetImages: EditorInsetImage[];
   focusObjects: FocusObject[];
+  overlayImages?: EditorOverlayImage[];
 
   selectedObjectId: string | null;
 
@@ -121,6 +122,19 @@ type PendingInsetAsset = {
   id: string;
   name: string;
   imageSrc: string;
+};
+
+type EditorOverlayImage = {
+  id: string;
+  name: string;
+
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+
+  imageSrc: string;
+  aspectRatio: number;
 };
 
 const SNAP_ANGLES = [0, 45, 90, 135, 180, -45, -90, -135, -180];
@@ -315,6 +329,100 @@ function InsetImageObject({
   );
 }
 
+function OverlayImageObject({
+  overlay,
+  isSelected,
+  tool,
+  scale,
+  setSelectedObjectId,
+  setOverlayImages,
+}: {
+  overlay: EditorOverlayImage;
+  isSelected: boolean;
+  tool: Tool;
+  scale: number;
+  setSelectedObjectId: React.Dispatch<React.SetStateAction<string | null>>;
+  setOverlayImages: React.Dispatch<React.SetStateAction<EditorOverlayImage[]>>;
+}) {
+  const [img] = useImage(overlay.imageSrc);
+  const s = (value: number) => value / (scale > 0 ? scale : 1);
+
+  return (
+    <React.Fragment>
+      <Group
+        x={overlay.x}
+        y={overlay.y}
+        draggable={tool === "select"}
+        onMouseDown={(e) => {
+          e.cancelBubble = true;
+          setSelectedObjectId(overlay.id);
+        }}
+        onDragEnd={(e) => {
+          setOverlayImages((current) =>
+            current.map((existing) =>
+              existing.id === overlay.id
+                ? { ...existing, x: e.target.x(), y: e.target.y() }
+                : existing
+            )
+          );
+        }}
+      >
+        {img && (
+          <KonvaImage
+            image={img}
+            width={overlay.width}
+            height={overlay.height}
+          />
+        )}
+
+        {isSelected && (
+          <Rect
+            width={overlay.width}
+            height={overlay.height}
+            stroke={SELECTED_COLOR}
+            strokeWidth={s(3)}
+            dash={[s(8), s(6)]}
+            listening={false}
+          />
+        )}
+      </Group>
+
+      {isSelected && tool === "select" && (
+        <Rect
+          x={overlay.x + overlay.width - 8}
+          y={overlay.y + overlay.height - 8}
+          width={16}
+          height={16}
+          fill={SELECTED_COLOR}
+          stroke="white"
+          strokeWidth={5}
+          cornerRadius={3}
+          draggable
+          onMouseDown={(e) => {
+            e.cancelBubble = true;
+            setSelectedObjectId(overlay.id);
+          }}
+          onDragMove={(e) => {
+            const right = e.target.x() + 8;
+            const rawWidth = right - overlay.x;
+
+            const newWidth = Math.max(40, rawWidth);
+            const newHeight = newWidth / overlay.aspectRatio;
+
+            setOverlayImages((current) =>
+              current.map((existing) =>
+                existing.id === overlay.id
+                  ? { ...existing, width: newWidth, height: newHeight }
+                  : existing
+              )
+            );
+          }}
+        />
+      )}
+    </React.Fragment>
+  );
+}
+
 function polygonToPoints(polygon: { x: number; y: number }[]): number[] {
   return polygon.flatMap((point) => [point.x, point.y]);
 }
@@ -388,8 +496,12 @@ function App({
   const stageRef = useRef<any>(null);
   const lastExportRequestIdRef = useRef<string | null>(null);
 
+  const overlayFileInputRef = useRef<HTMLInputElement | null>(null);
+
   const hydratedProjectKeyRef = useRef<string | null>(null);
   const isHydratingInitialStateRef = useRef(false);
+
+  const [overlayImages, setOverlayImages] = useState<EditorOverlayImage[]>([]);
 
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
@@ -471,6 +583,9 @@ function App({
     setInsetImages((current) =>
       current.filter((insetImage) => insetImage.id !== selectedObjectId)
     );
+    setOverlayImages((current) =>
+      current.filter((overlayImage) => overlayImage.id !== selectedObjectId)
+    );
 
     setFocusObjects((current) =>
       current.filter((focusObject) => focusObject.id !== selectedObjectId)
@@ -487,6 +602,47 @@ function App({
       x: pointer.x / scale,
       y: pointer.y / scale,
     };
+  };
+
+  const handleOverlayFileSelected = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const imageSrc = reader.result as string;
+      const img = new window.Image();
+
+      img.onload = () => {
+        const maxWidth = 160;
+        const aspectRatio = img.width / img.height;
+        const width = maxWidth;
+        const height = width / aspectRatio;
+
+        const newOverlayImage: EditorOverlayImage = {
+          id: `overlay_img_${Date.now()}`,
+          name: file.name,
+          x: dimensions.width / 2 - width / 2,
+          y: dimensions.height / 2 - height / 2,
+          width,
+          height,
+          imageSrc,
+          aspectRatio,
+        };
+
+        setOverlayImages((prev) => [...prev, newOverlayImage]);
+        setSelectedObjectId(newOverlayImage.id);
+        setTool("select");
+      };
+
+      img.src = imageSrc;
+    };
+
+    reader.readAsDataURL(file);
+    event.target.value = "";
   };
 
   const createDetailViewFromFocusObject = (focusObject: FocusObject) => {
@@ -531,6 +687,7 @@ function App({
     callouts,
     detailViews: insets,
     insetImages,
+    overlayImages,
     focusObjects,
     selectedObjectId,
   });
@@ -585,6 +742,7 @@ function App({
     insets,
     insetImages,
     focusObjects,
+    overlayImages,
   ]);
 
   useEffect(() => {
@@ -605,6 +763,7 @@ function App({
     insetImages,
     focusObjects,
     selectedObjectId,
+    overlayImages,
   ]);
 
   useEffect(() => {
@@ -636,6 +795,7 @@ function App({
       setCallouts(stateToLoad.callouts ?? []);
       setInsets(stateToLoad.detailViews ?? []);
       setInsetImages(stateToLoad.insetImages ?? []);
+      setOverlayImages(stateToLoad.overlayImages ?? []);
 
       if (stateToLoad.focusObjects) {
         setFocusObjects(stateToLoad.focusObjects);
@@ -651,6 +811,7 @@ function App({
       setCallouts([]);
       setInsets([]);
       setInsetImages([]);
+      setOverlayImages([]);
       setSelectedObjectId(null);
     }
 
@@ -725,6 +886,10 @@ function App({
       if (event.key.toLowerCase() === "v") setTool("detail");
       if (event.key.toLowerCase() === "f") setTool("focus");
       if (event.key.toLowerCase() === "a") setTool("arrow");
+      if (event.key.toLowerCase() === "o") {
+        setTool("overlay");
+        overlayFileInputRef.current?.click();
+      }
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -753,6 +918,13 @@ function App({
         boxSizing: "border-box",
       }}
     >
+    <input
+      ref={overlayFileInputRef}
+      type="file"
+      accept="image/*"
+      style={{ display: "none" }}
+      onChange={handleOverlayFileSelected}
+    />
       <div
         style={{
           display: "flex",
@@ -826,6 +998,13 @@ function App({
 
             <ToolButton active={tool === "inset"} onClick={() => setTool("inset")}>
               Inset (I)
+            </ToolButton>
+
+            <ToolButton
+              active={tool === "overlay"}
+              onClick={() => overlayFileInputRef.current?.click()}
+            >
+              Overlay (O)
             </ToolButton>
           </div>
         </div>
@@ -998,6 +1177,18 @@ function App({
                     height={dimensions.height}
                   />
                 )}
+
+                {overlayImages.map((overlay) => (
+                  <OverlayImageObject
+                    key={overlay.id}
+                    overlay={overlay}
+                    isSelected={selectedObjectId === overlay.id}
+                    tool={tool}
+                    scale={scale}
+                    setSelectedObjectId={setSelectedObjectId}
+                    setOverlayImages={setOverlayImages}
+                  />
+                ))}
 
                 {aiSuggestions?.movement_lines?.map((line, index) => (
                   <React.Fragment key={`ai-line-${index}`}>
