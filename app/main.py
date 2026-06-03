@@ -48,7 +48,9 @@ from vision.mask_handler import (
 from helios_editor.helios_editor_component import helios_editor
 from exporting.react_state_export import draw_react_editor_state
 
-version = "2.5"
+version = "3.5"
+
+EXPORT_FINAL_SIZE = (599, 415)
 
 INSET_SIZE_PRESETS = {
     "Small": 340,
@@ -1594,7 +1596,18 @@ def main():
 
                     exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
+                    exported_image = ImageOps.fit(
+                        exported_image,
+                        EXPORT_FINAL_SIZE,
+                        method=Image.Resampling.LANCZOS,
+                        centering=(0.5, 0.5),
+                    )
+
                     st.session_state.final_result_image = exported_image
+
+                    # exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+                    #
+                    # st.session_state.final_result_image = exported_image
                     st.session_state.export_ready = True
                     st.session_state.last_consumed_export_request_id = returned_export_id
                     st.session_state.export_request_id = None
@@ -1618,7 +1631,18 @@ def main():
 
                 exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
+                exported_image = ImageOps.fit(
+                    exported_image,
+                    EXPORT_FINAL_SIZE,
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+
                 st.session_state.final_result_image = exported_image
+
+                # exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+                #
+                # st.session_state.final_result_image = exported_image
                 st.session_state.last_consumed_export_request_id = returned_export_id
 
                 st.session_state.export_ready = True
