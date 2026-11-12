@@ -1,7 +1,7 @@
 import os
 import streamlit.components.v1 as components
 
-_RELEASE = False # Switch to True before deployment
+_RELEASE = True # Switch to True before deployment
 
 
 if not _RELEASE:
