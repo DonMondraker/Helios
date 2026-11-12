@@ -4,8 +4,8 @@ from PIL import Image
 
 
 MAIN_FOCUS = np.array([255, 160, 70], dtype=np.float32)
-DARK_GREY = np.array([90, 90, 90], dtype=np.float32)
-LIGHT_GREY = np.array([180, 180, 180], dtype=np.float32)
+DARK_GREY = np.array([140, 140, 140], dtype=np.float32)
+LIGHT_GREY = np.array([140, 140, 140], dtype=np.float32)
 WHITE = np.array([255, 255, 255], dtype=np.float32)
 
 
