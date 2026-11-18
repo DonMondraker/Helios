@@ -142,6 +142,45 @@ def deserialize_project(data: bytes) -> dict:
             "Invalid Helios project: illustrations must be a list."
         )
 
+
+    # Every illustration must have a valid, unique identifier.
+    seen_illustration_ids = set()
+
+    for illustration in project["illustrations"]:
+        if not isinstance(illustration, dict):
+            raise ValueError(
+                "Invalid Helios project: illustration must be an object."
+            )
+
+        illustration_id = illustration.get("illustration_id")
+
+        if not isinstance(illustration_id, str) or not illustration_id.strip():
+            raise ValueError(
+                "Invalid Helios project: illustration ID is missing."
+            )
+
+        if illustration_id in seen_illustration_ids:
+            raise ValueError(
+                "Invalid Helios project: duplicate illustration ID."
+            )
+
+        seen_illustration_ids.add(illustration_id)
+
+
+        illustration_name = illustration.get("name")
+
+        if not isinstance(illustration_name, str) or not illustration_name.strip():
+            raise ValueError(
+                "Invalid Helios project: illustration name is missing."
+            )
+
+        if not isinstance(illustration.get("state"), dict):
+            raise ValueError(
+                "Invalid Helios project: illustration state must be an object."
+            )
+
+
+
     return project
     
     

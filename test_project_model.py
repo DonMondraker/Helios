@@ -59,11 +59,14 @@ def test_project_model():
     assert project["illustrations"][0]["state"]["render_settings"]["enhance_focus"] is True
     assert project["illustrations"][1]["state"]["render_settings"]["enhance_focus"] is False
 
-    # Modify illustration A
-    project["illustrations"][0]["state"]["render_settings"]["enhance_focus"] = False
+    # Modify illustration B
+    project["illustrations"][1]["state"]["render_settings"]["enhance_focus"] = True
 
-    # Illustration B should remain unchanged
-    assert project["illustrations"][1]["state"]["render_settings"]["enhance_focus"] is False
+    # Illustration A should remain unchanged
+    assert project["illustrations"][0]["state"]["render_settings"]["enhance_focus"] is True
+
+    # Restore illustration B for subsequent tests
+    project["illustrations"][1]["state"]["render_settings"]["enhance_focus"] = False
     
         # Retrieve illustrations by ID
     retrieved_a = get_illustration(project, id_a)
@@ -365,5 +368,80 @@ def test_project_model():
     print("Helios 2.0 project model test passed!")
 
 
+# if __name__ == "__main__":
+#     test_project_model()
+
+def test_nested_annotation_isolation():
+    project = create_empty_project("Isolation Test")
+
+    shared_state = {
+        "annotations": {
+            "manual_lines": [],
+        },
+    }
+
+    id_a = add_illustration(project, "Illustration A", shared_state)
+    id_b = add_illustration(project, "Illustration B", shared_state)
+
+    illustration_a = get_illustration(project, id_a)
+    illustration_b = get_illustration(project, id_b)
+
+    # Modify only illustration A
+    illustration_a["state"]["annotations"]["manual_lines"].append(
+        {"id": "line-a", "length": 100}
+    )
+
+    # Illustration B must remain unchanged
+    assert illustration_b["state"]["annotations"]["manual_lines"] == []
+
+    # The original input dictionary must also remain unchanged
+    assert shared_state["annotations"]["manual_lines"] == []
+
+def test_image_mask_isolation():
+    project = create_empty_project("Image Isolation Test")
+
+    # Create a shared mask image
+    original_mask = Image.new(
+        "L",
+        (20, 20),
+        color=0,
+    )
+
+    shared_state = {
+        "focus_mask": original_mask,
+    }
+
+    id_a = add_illustration(
+        project,
+        "Illustration A",
+        shared_state,
+    )
+
+    id_b = add_illustration(
+        project,
+        "Illustration B",
+        shared_state,
+    )
+
+    illustration_a = get_illustration(project, id_a)
+    illustration_b = get_illustration(project, id_b)
+
+    mask_a = illustration_a["state"]["focus_mask"]
+    mask_b = illustration_b["state"]["focus_mask"]
+
+    # Confirm that the masks are separate objects
+    assert mask_a is not mask_b
+    assert mask_a is not original_mask
+
+    # Modify only illustration A's mask
+    mask_a.putpixel((5, 5), 255)
+
+    # Illustration B and the original must remain unchanged
+    assert mask_b.getpixel((5, 5)) == 0
+    assert original_mask.getpixel((5, 5)) == 0
+
+
 if __name__ == "__main__":
     test_project_model()
+    test_nested_annotation_isolation()
+    test_image_mask_isolation()

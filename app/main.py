@@ -41,6 +41,10 @@ from project_state.project_model import (
     update_illustration_fields,
     get_illustration,
 )
+from project_state.project_file import (
+    save_project_file,
+    load_project_file,
+)
 from project_state.persistence import build_inset_asset
 from config.camera_presets import CAMERA_PRESETS, resolve_direction, resolve_direction_vector
 from vision.mask_handler import (
@@ -965,6 +969,82 @@ def main():
     if st.session_state.helios_project is None:
         st.session_state.helios_project = create_empty_project()
 
+
+    if st.session_state.pop("pending_project_activation", False):
+        loaded_project = st.session_state.get("pending_loaded_project")
+
+        if loaded_project is not None:
+            illustrations = loaded_project["illustrations"]
+
+            # Replace the project without saving the previous
+            # illustration into the newly loaded project.
+            st.session_state.helios_project = loaded_project
+            st.session_state.pending_loaded_project = None
+
+            # Prevent an old pending switch from interfering.
+            st.session_state.pending_illustration_switch = None
+
+            # Prevent a previously uploaded image from being
+            # registered as an illustration in the loaded project.
+            st.session_state.uploaded_image_bytes = None
+            st.session_state.uploaded_image_filename = None
+
+            # Keep the current uploader's image marked as processed,
+            # so it cannot be added again to the loaded project.
+            existing_upload = st.session_state.get(
+                "startup_image_upload"
+            )
+
+            if existing_upload is not None:
+                st.session_state.last_uploaded_image_hash = (
+                    hashlib.sha256(
+                        existing_upload.getvalue()
+                    ).hexdigest()
+                )
+            else:
+                st.session_state.last_uploaded_image_hash = None
+
+            # Clear any previously prepared downloads.
+            st.session_state.helios_project_file_bytes = None
+            st.session_state.batch_export_zip_bytes = None
+            st.session_state.batch_export_active = False
+
+            if illustrations:
+                first_illustration = illustrations[0]
+                illustration_id = first_illustration["illustration_id"]
+
+                st.session_state.active_illustration_id = illustration_id
+
+                restore_illustration_state(
+                    st.session_state,
+                    first_illustration["state"],
+                )
+
+                st.session_state.library_source_active = True
+                st.session_state.library_source_filename = (
+                    first_illustration["state"]
+                    .get("source", {})
+                    .get("filename", first_illustration["name"])
+                )
+
+                st.session_state.editor_project_key = (
+                    f"illustration_{illustration_id}"
+                )
+
+            else:
+                st.session_state.active_illustration_id = None
+                st.session_state.library_source_active = False
+                st.session_state.original_image = None
+                st.session_state.focus_mask = None
+                st.session_state.context_mask = None
+                st.session_state.result_image = None
+                st.session_state.final_result_image = None
+                st.session_state.react_editor_state = None
+                st.session_state.editor_project_key = (
+                    f"empty_project_{loaded_project['project_id']}"
+                )
+
+
     # This is where I put the pending_switch!
     pending_switch = st.session_state.pop(
         "pending_illustration_switch", None
@@ -998,6 +1078,51 @@ def main():
             )
 
     # st.markdown("### Start Project")
+
+
+    uploaded_project_file = st.file_uploader(
+        "Open Helios Project",
+        type=["helios"],
+        key="startup_project_upload",
+        help="Open a previously saved editable Helios project.",
+    )
+
+
+    if uploaded_project_file is not None:
+        project_bytes = uploaded_project_file.getvalue()
+        project_hash = hashlib.sha256(project_bytes).hexdigest()
+
+        if st.session_state.get("last_loaded_project_hash") != project_hash:
+            try:
+                loaded_project = load_project_file(project_bytes)
+            except ValueError as exc:
+                st.error(f"Could not open Helios project: {exc}")
+            else:
+                st.session_state.pending_loaded_project = loaded_project
+                st.session_state.last_loaded_project_hash = project_hash
+                st.success(
+                    f"Project file validated: "
+                    f"{len(loaded_project['illustrations'])} illustrations."
+                )
+
+
+
+    pending_project = st.session_state.get("pending_loaded_project")
+
+    if pending_project is not None:
+        st.info(
+            f"Ready to open: {pending_project['project_name']} "
+            f"({len(pending_project['illustrations'])} illustrations)"
+        )
+
+        if st.button(
+                "Open Validated Project",
+                use_container_width=True,
+        ):
+            st.session_state.pending_project_activation = True
+            st.rerun()
+
+
 
     uploaded_file = st.file_uploader(
         "Upload image",
@@ -1401,6 +1526,36 @@ def main():
 
             elif section == "Export":
                 st.subheader("Export")
+
+
+                st.markdown("#### Native Project")
+
+                if st.button(
+                        "Prepare Helios Project",
+                        use_container_width=True,
+                        disabled=st.session_state.get("batch_export_active", False),
+                ):
+                    save_active_illustration_state(st.session_state)
+
+                    st.session_state.helios_project_file_bytes = (
+                        save_project_file(st.session_state.helios_project)
+                    )
+
+                project_file_bytes = st.session_state.get(
+                    "helios_project_file_bytes"
+                )
+
+                if project_file_bytes is not None:
+                    st.download_button(
+                        label="Download .helios Project",
+                        data=project_file_bytes,
+                        file_name="helios_project.helios",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
+
+                st.divider()
+
 
                 export_base_name = st.text_input(
                     "Base file name",
