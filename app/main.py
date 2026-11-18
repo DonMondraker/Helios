@@ -7,6 +7,7 @@ import base64
 import cv2
 import uuid
 from io import BytesIO
+from copy import deepcopy
 
 from ui.uploader import upload_image
 from vision.preprocessor import normalize_creoview_image
@@ -29,16 +30,18 @@ from rendering.strategy_to_annotations import strategy_to_annotations
 from exporting.export_config import EXPORT_PRESETS, EXPORT_BUNDLES
 from exporting.image_export import draw_focus_halos, draw_react_inset_images
 from exporting.exporter import (
-    export_bundle_zip,
+    export_illustrations_zip,
 )
 from ai.suggestion_engine import request_ai_suggestions
-from project_state.persistence import (
-    build_project_state,
-    serialize_project_state,
-    load_project_state_from_bytes,
-    apply_project_state_to_session,
-    build_inset_asset,
+from project_state.project_model import (
+    create_empty_project,
+    add_illustration,
+    encode_image,
+    decode_image,
+    update_illustration_fields,
+    get_illustration,
 )
+from project_state.persistence import build_inset_asset
 from config.camera_presets import CAMERA_PRESETS, resolve_direction, resolve_direction_vector
 from vision.mask_handler import (
     subtract_context_supported_regions_from_focus,
@@ -48,7 +51,7 @@ from vision.mask_handler import (
 from helios_editor.helios_editor_component import helios_editor
 from exporting.react_state_export import draw_react_editor_state
 
-version = "3.5"
+version = "2.0.1"
 
 EXPORT_FINAL_SIZE = (599, 415)
 
@@ -57,6 +60,7 @@ INSET_SIZE_PRESETS = {
     "Medium": 420,
     "Large": 480,
 }
+
 
 
 def _create_inset_asset_from_upload(uploaded_file, session_state) -> tuple[str, dict]:
@@ -348,6 +352,234 @@ def _build_preview_repositioned_inset(
         },
     }
 
+def encode_inset_assets(inset_assets: dict) -> dict:
+    """
+    Convert inset assets into JSON-compatible data.
+    Preserve images as base64 PNG strings.
+    """
+    encoded_assets = {}
+
+    for asset_id, asset in inset_assets.items():
+        encoded_asset = {}
+
+        for key, value in asset.items():
+            if isinstance(value, Image.Image):
+                encoded_asset[key] = {
+                    "__type__": "pil_image",
+                    "data_b64": encode_image(value),
+                }
+            else:
+                encoded_asset[key] = deepcopy(value)
+
+        encoded_assets[asset_id] = encoded_asset
+
+    return encoded_assets
+
+def decode_inset_assets(encoded_assets: dict) -> dict:
+    """
+    Restore inset assets from JSON-compatible data.
+    Convert encoded PNG images back into PIL images.
+    """
+    decoded_assets = {}
+
+    for asset_id, asset in encoded_assets.items():
+        decoded_asset = {}
+
+        for key, value in asset.items():
+            if (
+                    isinstance(value, dict)
+                    and value.get("__type__") == "pil_image"
+            ):
+                decoded_asset[key] = decode_image(
+                    value["data_b64"]
+                )
+            else:
+                decoded_asset[key] = deepcopy(value)
+
+        decoded_assets[asset_id] = decoded_asset
+
+    return decoded_assets
+
+def restore_illustration_state(
+        session_state,
+        illustration_state: dict,
+) -> None:
+    """
+    Restore a saved illustration into Streamlit session state.
+    """
+
+    # Restore original source image
+    source = illustration_state.get("source", {})
+
+    session_state.original_image = decode_image(
+        source.get("image_b64"),
+        mode="RGB",
+    )
+
+    # Restore masks
+    masks = illustration_state.get("masks", {})
+
+    session_state.focus_mask = decode_image(
+        masks.get("focus_mask_b64"),
+        mode="L",
+    )
+
+    session_state.context_mask = decode_image(
+        masks.get("context_mask_b64"),
+        mode="L",
+    )
+
+    # Restore rendered images
+    rendered_images = illustration_state.get("rendered_images", {})
+
+    session_state.result_image = decode_image(
+        rendered_images.get("result_image_b64"),
+        mode="RGB",
+    )
+
+    session_state.final_result_image = decode_image(
+        rendered_images.get("final_result_image_b64"),
+        mode="RGB",
+    )
+
+    # Restore settings
+    for section in ("render_settings", "mask_settings"):
+        for key, value in illustration_state.get(section, {}).items():
+            session_state[key] = deepcopy(value)
+
+    # Restore workflow
+    workflow = illustration_state.get("workflow", {})
+
+    session_state.mask_step_completed = workflow.get(
+        "mask_step_completed", False
+    )
+
+    # Restore annotations
+    annotations = illustration_state.get("annotations", {})
+
+    session_state.react_editor_state = deepcopy(
+        annotations.get("react_editor_state")
+    )
+
+    session_state.callouts = deepcopy(
+        annotations.get("callouts", [])
+    )
+
+    session_state.manual_lines = deepcopy(
+        annotations.get("manual_lines", [])
+    )
+
+    # Restore insets
+    session_state.insets = deepcopy(
+        illustration_state.get("insets", [])
+    )
+
+    session_state.inset_assets = decode_inset_assets(
+        illustration_state.get("inset_assets", {})
+    )
+
+    # Clear temporary editor actions
+    session_state.selected_inset_id = None
+    session_state.pending_inset_asset_id = None
+    session_state.pending_inset_leader_target_for = None
+    session_state.pending_inset_reposition_for = None
+
+    session_state.export_request_id = None
+    session_state.last_consumed_export_request_id = None
+    session_state.export_ready = False
+
+def save_active_illustration_state(session_state) -> bool:
+    """
+    Save the active illustration's working state
+    into the Helios 2.0 project.
+    """
+    project = session_state.get("helios_project")
+    illustration_id = session_state.get("active_illustration_id")
+
+    if project is None or illustration_id is None:
+        return False
+
+    focus_mask = session_state.get("focus_mask")
+    context_mask = session_state.get("context_mask")
+    result_image = session_state.get("result_image")
+    final_result_image = session_state.get("final_result_image")
+
+    fields = {
+        "insets": deepcopy(session_state.get("insets", [])),
+        "inset_assets": encode_inset_assets(
+            session_state.get("inset_assets", {})
+        ),
+        "rendered_images": {
+            "result_image_b64": encode_image(result_image),
+            "final_result_image_b64": encode_image(final_result_image),
+        },
+        "masks": {
+            "focus_mask_b64": encode_image(focus_mask),
+            "context_mask_b64": encode_image(context_mask),
+        },
+        "render_settings": {
+            "background_threshold": session_state.get(
+                "background_threshold", 180
+            ),
+            "enhance_focus": session_state.get(
+                "enhance_focus", True
+            ),
+            "enhance_contour": session_state.get(
+                "enhance_contour", True
+            ),
+            "remove_background_details": session_state.get(
+                "remove_background_details", False
+            ),
+            "reduce_background_details": session_state.get(
+                "reduce_background_details", False
+            ),
+            "background_reduce_strength": session_state.get(
+                "background_reduce_strength", 0.45
+            ),
+            "background_target_gray": session_state.get(
+                "background_target_gray", 140
+            ),
+            "background_reduce_grayscale": session_state.get(
+                "background_reduce_grayscale", False
+            ),
+            "background_reduce_blur": session_state.get(
+                "background_reduce_blur", False
+            ),
+            "background_reduce_desaturate": session_state.get(
+                "background_reduce_desaturate", True
+            ),
+        },
+        "mask_settings": {
+            "hue_tolerance": session_state.get(
+                "hue_tolerance", 18
+            ),
+            "min_saturation": session_state.get(
+                "min_saturation", 45
+            ),
+            "min_value": session_state.get(
+                "min_value", 20
+            ),
+        },
+        "workflow": {
+            "mask_step_completed": session_state.get(
+                "mask_step_completed", False
+            ),
+        },
+        "annotations": {
+            "react_editor_state": session_state.get(
+                "react_editor_state"
+            ),
+            "callouts": session_state.get("callouts", []),
+            "manual_lines": session_state.get("manual_lines", []),
+        },
+    }
+
+    return update_illustration_fields(
+        project,
+        illustration_id,
+        fields,
+    )
+
 def pil_image_to_data_url(image: Image.Image) -> str:
     import io
 
@@ -355,21 +587,6 @@ def pil_image_to_data_url(image: Image.Image) -> str:
     image.save(buffer, format="PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{encoded}"
-
-
-def react_lines_to_renderer_lines(react_state: dict | None) -> list[dict]:
-    if not react_state:
-        return []
-
-    return [
-        {
-            "x1": int(line["x1"]),
-            "y1": int(line["y1"]),
-            "x2": int(line["x2"]),
-            "y2": int(line["y2"]),
-        }
-        for line in react_state.get("lines", [])
-    ]
 
 
 def react_lines_to_renderer_lines(react_state: dict | None) -> list[dict]:
@@ -460,26 +677,6 @@ def draw_react_detail_views(image: Image.Image, react_state: dict | None) -> Ima
             outline=(0, 0, 0),
             width=2,
         )
-
-        # if inset.get("showLeader", True):
-        #     anchor_x = int(inset["leaderAnchorX"])
-        #     anchor_y = int(inset["leaderAnchorY"])
-        #     center_x = x + w // 2
-        #     center_y = y + h // 2
-        #
-        #     # leader halo
-        #     draw.line(
-        #         [(anchor_x, anchor_y), (center_x, center_y)],
-        #         fill=(255, 255, 255),
-        #         width=8,
-        #     )
-        #
-        #     # leader line
-        #     draw.line(
-        #         [(anchor_x, anchor_y), (center_x, center_y)],
-        #         fill=(0, 0, 0),
-        #         width=3,
-        #     )
 
     return result
 
@@ -703,6 +900,8 @@ def main():
     )
 
     defaults = {
+    	"helios_project": None,
+    	"active_illustration_id": None,
         "focus_mask": None,
         "context_mask": None,
         "result_image": None,
@@ -719,10 +918,6 @@ def main():
         "ai_strategy": None,
         "ai_annotation_suggestions": None,
         "approved_ai_lines": [],
-        "pending_loaded_project_state": None,
-        "project_state_loaded_notice": False,
-        "last_loaded_project_json_hash": None,
-        "auto_rebuild_after_load": False,
         "ui_mode": "Production",
         "annotation_tool": "Line",
         "annotation_canvas_version": 0,
@@ -745,6 +940,14 @@ def main():
         "export_request_id": None,
         "last_consumed_export_request_id": None,
         "export_ready": False,
+        "batch_export_active": False,
+        "batch_export_queue": [],
+        "batch_export_images": [],
+        "batch_export_index": 0,
+        "batch_export_zip_bytes": None,
+        "batch_export_original_illustration_id": None,
+        "batch_export_bundle_key": None,
+        "batch_export_requested_illustration_id": None,
         "lock_focus_objects": False,
         "remove_background_details": False,
         "reduce_background_details": False,
@@ -753,94 +956,114 @@ def main():
         "background_reduce_grayscale": False,
         "background_reduce_blur": False,
         "background_reduce_desaturate": True,
-        "loaded_project_raw_image": None,
-        "loaded_project_filename": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
+    # Helios 2.0 project initialization
+    if st.session_state.helios_project is None:
+        st.session_state.helios_project = create_empty_project()
+
+    # This is where I put the pending_switch!
+    pending_switch = st.session_state.pop(
+        "pending_illustration_switch", None
+    )
+
+    if pending_switch is not None:
+        selected_illustration = get_illustration(
+            st.session_state.helios_project,
+            pending_switch,
+        )
+
+        if selected_illustration is not None:
+            save_active_illustration_state(st.session_state)
+
+            st.session_state.active_illustration_id = pending_switch
+
+            restore_illustration_state(
+                st.session_state,
+                selected_illustration["state"],
+            )
+
+            st.session_state.library_source_active = True
+            st.session_state.library_source_filename = (
+                selected_illustration["state"]
+                .get("source", {})
+                .get("filename", selected_illustration["name"])
+            )
+
+            st.session_state.editor_project_key = (
+                f"illustration_{pending_switch}"
+            )
+
     # st.markdown("### Start Project")
 
-    upload_col, json_col = st.columns(2)
-
-    with upload_col:
-        uploaded_file = st.file_uploader(
-            "Upload image",
-            type=["png", "jpg", "jpeg"],
-            key="startup_image_upload",
-        )
-
-    with json_col:
-        project_state_upload = st.file_uploader(
-            "Load project JSON",
-            type=["json"],
-            key="startup_project_state_upload",
-        )
+    uploaded_file = st.file_uploader(
+        "Upload image",
+        type=["png", "jpg", "jpeg"],
+        key="startup_image_upload",
+        label_visibility="visible",
+    )
 
     if uploaded_file is not None:
         image_bytes = uploaded_file.getvalue()
         current_image_hash = hashlib.sha256(image_bytes).hexdigest()
 
         if st.session_state.last_uploaded_image_hash != current_image_hash:
+            # Preserve the previous illustration before activating a new one
+            if st.session_state.get("active_illustration_id") is not None:
+                save_active_illustration_state(st.session_state)
+            st.session_state.library_source_active = False
             st.session_state.uploaded_image_bytes = image_bytes
             st.session_state.uploaded_image_filename = uploaded_file.name
             st.session_state.last_uploaded_image_hash = current_image_hash
 
-            # Clear JSON-loaded project source
-            st.session_state.loaded_project_raw_image = None
-            st.session_state.loaded_project_filename = None
-            st.session_state.pending_loaded_project_state = None
-            st.session_state.last_loaded_project_json_hash = None
+            # Register the uploaded image in the Helios 2.0 project
+            uploaded_raw_image = Image.open(
+                BytesIO(image_bytes)
+            ).convert("RGB")
 
-            # New image = new editor project
-            st.session_state.editor_project_key = f"image_{current_image_hash[:16]}"
+            illustration_state = {
+                "source": {
+                    "filename": uploaded_file.name,
+                    "image_b64": encode_image(uploaded_raw_image),
+                },
+                "masks": {
+                    "focus_mask_b64": None,
+                    "context_mask_b64": None,
+                },
+                "annotations": {
+                    "react_editor_state": None,
+                },
+            }
+
+            illustration_id = add_illustration(
+                st.session_state.helios_project,
+                uploaded_file.name,
+                illustration_state,
+            )
+
+            st.session_state.active_illustration_id = illustration_id
+
+            st.session_state["illustration_count_debug"] = len(
+                st.session_state.helios_project["illustrations"]
+            )
+
+            # Each illustration gets its own React editor identity
+            st.session_state.editor_project_key = f"illustration_{illustration_id}"
+
+            # Clear the previous editor state for the new illustration
             st.session_state.react_editor_state = None
 
             st.rerun()
 
-    if project_state_upload is not None:
-        file_bytes = project_state_upload.getvalue()
-        current_json_hash = hashlib.sha256(file_bytes).hexdigest()
-
-        if st.session_state.last_loaded_project_json_hash != current_json_hash:
-            try:
-                loaded_state = load_project_state_from_bytes(file_bytes)
-
-                source_image = loaded_state.get("source", {}).get("source_image", {})
-                source_data_url = source_image.get("data_url")
-                source_filename = (
-                        source_image.get("filename")
-                        or loaded_state.get("source", {}).get("uploaded_filename")
-                        or "loaded_project.png"
-                )
-
-                if not source_data_url:
-                    st.error("Project JSON does not contain a source image.")
-                    return
-
-                _, encoded = source_data_url.split(",", 1)
-                image_bytes = base64.b64decode(encoded)
-                loaded_raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-
-                st.session_state.pending_loaded_project_state = loaded_state
-                st.session_state.loaded_project_raw_image = loaded_raw_image
-                st.session_state.loaded_project_filename = source_filename
-                st.session_state.last_loaded_project_json_hash = current_json_hash
-
-                # Important: isolate React localStorage per loaded JSON project
-                st.session_state.editor_project_key = f"project_{current_json_hash[:16]}"
-                st.session_state.react_editor_state = None
-
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Could not load project JSON: {e}")
-                return
-
-    if st.session_state.loaded_project_raw_image is not None:
-        raw_image = st.session_state.loaded_project_raw_image
-        active_filename = st.session_state.loaded_project_filename or "loaded_project.png"
+    if st.session_state.get("library_source_active", False):
+        raw_image = st.session_state.original_image
+        active_filename = (
+                st.session_state.get("library_source_filename")
+                or "library_illustration.png"
+        )
         uploaded_file = None
 
     elif st.session_state.uploaded_image_bytes is not None:
@@ -856,7 +1079,7 @@ def main():
 
     if (
             st.session_state.uploaded_image_bytes is not None
-            and st.session_state.loaded_project_raw_image is None
+            and not st.session_state.get("library_source_active", False)
             and st.session_state.last_uploaded_filename != active_filename
     ):
         st.session_state.last_uploaded_filename = active_filename
@@ -871,14 +1094,10 @@ def main():
         st.session_state.ai_strategy = None
         st.session_state.ai_annotation_suggestions = None
         st.session_state.approved_ai_lines = []
-        st.session_state.pending_loaded_project_state = None
-        st.session_state.project_state_loaded_notice = False
         st.session_state.manual_lines = []
 
         # React editor state
         st.session_state.react_editor_state = None
-
-        st.session_state.auto_rebuild_after_load = False
         st.session_state.insets = []
         st.session_state.inset_assets = {}
         st.session_state.selected_inset_id = None
@@ -886,72 +1105,10 @@ def main():
         st.session_state.pending_inset_leader_target_for = None
         st.session_state.pending_inset_reposition_for = None
 
-    if st.session_state.pending_loaded_project_state is not None:
-        try:
-            apply_project_state_to_session(
-                st.session_state.pending_loaded_project_state,
-                st.session_state,
-            )
-            st.session_state.pending_loaded_project_state = None
-            st.session_state.project_state_loaded_notice = True
-            st.session_state.auto_rebuild_after_load = True
-        except Exception as e:
-            st.session_state.pending_loaded_project_state = None
-            st.error(f"Could not apply loaded project state: {e}")
-
     focus_mask_exists = st.session_state.focus_mask is not None
     context_mask_exists = st.session_state.context_mask is not None
     both_masks_exist = focus_mask_exists and context_mask_exists
     full_result = st.session_state.get("result_image")
-
-    if (
-            st.session_state.auto_rebuild_after_load
-            and st.session_state.focus_mask is not None
-            and st.session_state.context_mask is not None
-    ):
-        try:
-            rebuilt_result = render_standardized_illustration(
-                image=image,
-                focus_mask=st.session_state.focus_mask,
-                context_mask=st.session_state.context_mask,
-                background_threshold=st.session_state.get("background_threshold", 210),
-                enhance_focus=st.session_state.get("enhance_focus", True),
-                enhance_contour=st.session_state.get("enhance_contour", True),
-            )
-
-            background_mode = "normal"
-
-            if st.session_state.get("remove_background_details"):
-                background_mode = "remove"
-            elif (
-                    st.session_state.get("reduce_background_details")
-                    and not st.session_state.get("remove_background_details")
-            ):
-                background_mode = "reduce"
-
-            protected_mask = combine_masks(
-                st.session_state.focus_mask,
-                st.session_state.context_mask,
-            )
-
-            rebuilt_result = apply_background_detail_mode(
-                image=rebuilt_result,
-                focus_mask=protected_mask,
-                mode=background_mode,
-                reduce_strength=st.session_state.get("background_reduce_strength", 0.65),
-                grayscale_background=st.session_state.get("background_reduce_grayscale", False),
-                blur_background=st.session_state.get("background_reduce_blur", False),
-                desaturate_background=st.session_state.get("background_reduce_desaturate", False),
-            )
-
-            st.session_state.result_image = rebuilt_result
-            st.session_state.final_result_image = rebuilt_result
-            st.session_state.auto_rebuild_after_load = False
-            full_result = rebuilt_result
-        except Exception as e:
-            st.session_state.auto_rebuild_after_load = False
-            st.error(f"Could not auto-rebuild loaded project: {e}")
-
 
     with st.sidebar:
 
@@ -1065,12 +1222,6 @@ def main():
                     st.checkbox("Enhance focus detail", value=True, key="enhance_focus")
                     st.checkbox("Enhance contours", value=True, key="enhance_contour")
 
-                    # st.checkbox(
-                    #     "Lock focus objects",
-                    #     key="lock_focus_objects",
-                    #     help="Freeze detected focus objects so re-rendering does not replace or reset them.",
-                    # )
-
                     remove_background = st.checkbox(
                         "Remove background",
                         key="remove_background_details",
@@ -1102,23 +1253,11 @@ def main():
                             key="background_target_gray",
                         )
 
-                        # st.checkbox(
-                        #     "Grayscale background",
-                        #     key="background_reduce_grayscale",
-                        #     help="Convert non-focus background to grayscale.",
-                        # )
-
                         st.checkbox(
                             "Blur background",
                             key="background_reduce_blur",
                             help="Softly blur non-focus background details.",
                         )
-
-                        # st.checkbox(
-                        #     "Desaturate background",
-                        #     key="background_reduce_desaturate",
-                        #     help="Reduce background color intensity without making it fully grayscale.",
-                        # )
 
                 render_button_label = (
                     "Render Illustration"
@@ -1210,19 +1349,6 @@ def main():
                     except Exception as e:
                         st.error(f"Inset processing error: {e}")
 
-                # if inset_upload is not None:
-                #     if st.button("Process Inset Image", use_container_width=True):
-                #         try:
-                #             asset_id, asset = _create_inset_asset_from_upload(
-                #                 inset_upload,
-                #                 st.session_state,
-                #             )
-                #             st.session_state.inset_assets[asset_id] = asset
-                #             st.session_state.pending_inset_asset_id = asset_id
-                #             st.success("Inset processed. Select Inset tool and click the image to place it.")
-                #         except Exception as e:
-                #             st.error(f"Inset processing error: {e}")
-
                 if st.session_state.get("pending_inset_asset_id"):
                     pending_asset = st.session_state.inset_assets.get(st.session_state.pending_inset_asset_id)
                     if pending_asset and pending_asset.get("rendered_image") is not None:
@@ -1255,136 +1381,6 @@ def main():
                         if st.button("Delete Inset", use_container_width=True):
                             _delete_selected_inset(st.session_state)
                             st.rerun()
-
-                st.markdown("---")
-                st.subheader("AI Suggestion Panel")
-
-                camera_preset = st.selectbox(
-                    "Camera Angle",
-                    list(CAMERA_PRESETS.keys()),
-                    index=list(CAMERA_PRESETS.keys()).index(
-                        st.session_state.get("camera_preset", "TRUCK_ISO1")
-                    ) if st.session_state.get("camera_preset", "TRUCK_ISO1") in CAMERA_PRESETS else 0,
-                )
-                st.session_state.camera_preset = camera_preset
-
-                operation_type = st.selectbox(
-                    "Operation",
-                    ["Remove", "Install", "General"],
-                    index=["Remove", "Install", "General"].index(
-                        st.session_state.get("operation_type", "Remove")
-                    ) if st.session_state.get("operation_type", "Remove") in ["Remove", "Install", "General"] else 0,
-                )
-                st.session_state.operation_type = operation_type
-
-                if st.session_state.get("ui_mode", "Production") == "Debug":
-                    st.write(f"**Resolved direction:** {resolve_direction(camera_preset, operation_type)}")
-
-                if st.button("Generate AI Suggestions", use_container_width=True):
-                    if st.session_state.result_image is None:
-                        st.warning("Render an illustration first.")
-                    else:
-                        try:
-                            focus_bbox = get_mask_bbox(st.session_state.focus_mask)
-                            context_bbox = get_mask_bbox(st.session_state.context_mask)
-
-                            focus_analysis = None
-                            if st.session_state.focus_mask is not None:
-                                focus_analysis = analyze_focus_mask(st.session_state.focus_mask).to_dict()
-
-                            ai_strategy = request_ai_suggestions(
-                                template_instruction="Suggest movement-line strategy for the highlighted focus parts. Do not suggest callouts.",
-                                image_width=st.session_state.result_image.size[0],
-                                image_height=st.session_state.result_image.size[1],
-                                focus_bbox=focus_bbox,
-                                context_bbox=context_bbox,
-                                focus_analysis=focus_analysis,
-                                extra_details="",
-                                model="gpt-5.4-mini",
-                            )
-
-                            resolved_direction = resolve_direction(camera_preset, operation_type)
-                            resolved_direction_vector = resolve_direction_vector(camera_preset, operation_type)
-
-                            extra_snap_angles = []
-
-                            if resolved_direction_vector is not None:
-                                dx, dy = resolved_direction_vector
-                                extra_snap_angles.append(math.degrees(math.atan2(dy, dx)))
-
-                            ai_strategy["suggested_direction"] = resolved_direction
-
-                            if resolved_direction_vector is not None:
-                                ai_strategy["suggested_direction_vector"] = [
-                                    resolved_direction_vector[0],
-                                    resolved_direction_vector[1],
-                                ]
-                            else:
-                                ai_strategy.pop("suggested_direction_vector", None)
-
-                            deterministic_suggestions = strategy_to_annotations(
-                                focus_mask=st.session_state.focus_mask,
-                                ai_strategy=ai_strategy,
-                                image_size=st.session_state.result_image.size,
-                            )
-
-                            deterministic_suggestions["callouts"] = []
-
-                            st.session_state.ai_strategy = ai_strategy
-                            st.session_state.ai_annotation_suggestions = deterministic_suggestions
-                            st.session_state.ai_notes = deterministic_suggestions.get("notes", [])
-                        except Exception as e:
-                            st.error(f"AI suggestion error: {e}")
-
-                ai_strategy = st.session_state.get("ai_strategy")
-                ai_annotation_suggestions = st.session_state.get("ai_annotation_suggestions")
-
-                if ai_strategy is not None:
-                    if st.session_state.get("ui_mode", "Production") == "Debug":
-                        st.markdown("### AI Strategy")
-                        st.write(f'**Task type:** {ai_strategy.get("task_type", "unknown")}')
-                        st.write(f'**Target mode:** {ai_strategy.get("target_mode", "unknown")}')
-                        st.write(f'**Suggested direction:** {ai_strategy.get("suggested_direction", "none")}')
-                        st.write(f'**Movement line strategy:** {ai_strategy.get("movement_line_strategy", "none")}')
-                        st.write(f'**Callout strategy:** {ai_strategy.get("callout_strategy", "none")}')
-                        st.write(f'**Max callouts:** {ai_strategy.get("max_callouts", 0)}')
-                        st.caption("Preview style: gray = pending AI suggestion, black = approved AI line")
-                    else:
-                        st.caption("AI suggestion ready.")
-
-                if ai_annotation_suggestions is not None:
-                    movement_count = len(ai_annotation_suggestions.get("movement_lines", []))
-                    callout_count = len(ai_annotation_suggestions.get("callouts", []))
-                    st.caption(
-                        f"Deterministic suggestion preview ready: {movement_count} movement line(s), {callout_count} callout(s)."
-                    )
-
-                    # if st.button("Apply AI Lines", use_container_width=True):
-                    #     for line in ai_annotation_suggestions.get("movement_lines", []):
-                    #         st.session_state.approved_ai_lines.append(
-                    #             {
-                    #                 "start": [int(line["start"][0]), int(line["start"][1])],
-                    #                 "end": [int(line["end"][0]), int(line["end"][1])],
-                    #             }
-                    #         )
-                    #     st.rerun()
-
-                    if st.session_state.approved_ai_lines:
-                        st.caption(f"Approved AI lines: {len(st.session_state.approved_ai_lines)}")
-                        if st.button("Clear Approved AI Lines", use_container_width=True):
-                            st.session_state.approved_ai_lines = []
-                            st.rerun()
-
-                    if st.button("Clear AI Suggestions", use_container_width=True):
-                        st.session_state.ai_strategy = None
-                        st.session_state.ai_annotation_suggestions = None
-                        st.session_state.ai_notes = []
-                        st.rerun()
-
-                    if st.session_state.ai_notes and st.session_state.get("ui_mode", "Production") == "Debug":
-                        with st.expander("AI Notes", expanded=False):
-                            for note in st.session_state.ai_notes:
-                                st.write(f"- {note}")
 
             elif section == "Masks":
                 st.subheader("Masks")
@@ -1427,67 +1423,107 @@ def main():
                         st.write("• Original CAD PNG")
                         st.write("• Project JSON")
 
-                final_image = st.session_state.get("final_result_image")
-
-                if final_image is not None:
+                if st.session_state.helios_project.get("illustrations"):
                     try:
-                        project_state = build_project_state(
-                            uploaded_filename=active_filename,
-                            session_state=st.session_state,
-                            raw_image=raw_image,
-                        )
-                        project_state_bytes = serialize_project_state(project_state)
-
-                        zip_bytes = export_bundle_zip(
-                            final_image=final_image,
-                            raw_image=raw_image,
-                            project_state_bytes=project_state_bytes,
-                            base_name=export_base_name,
-                            bundle_key=export_bundle_key,
-                        )
-                        # Render button
                         if st.button(
-                                "Render export from editor",
+                                "Render & Export Illustrations",
                                 use_container_width=True,
-                                disabled=st.session_state.get("export_request_id") is not None
+                                disabled=st.session_state.get("batch_export_active", False),
                         ):
-                            st.session_state.export_request_id = str(uuid.uuid4())
+                            save_active_illustration_state(st.session_state)
 
-                        # Download section
-                        if st.session_state.get("export_ready") and st.session_state.get("final_result_image") is not None:
+                            illustrations = st.session_state.helios_project.get(
+                                "illustrations", []
+                            )
+
+                            st.session_state.batch_export_queue = [
+                                illustration["illustration_id"]
+                                for illustration in illustrations
+                            ]
+
+                            st.session_state.batch_export_images = []
+                            st.session_state.batch_export_index = 0
+                            st.session_state.batch_export_zip_bytes = None
+                            st.session_state.batch_export_requested_illustration_id = None
+                            st.session_state.batch_export_current_illustration_id = None
+                            st.session_state.export_request_id = None
+                            st.session_state.export_ready = False
+
+                            st.session_state.batch_export_original_illustration_id = (
+                                st.session_state.active_illustration_id
+                            )
+
+                            st.session_state.batch_export_bundle_key = export_bundle_key
+                            st.session_state.batch_export_active = True
+
+
+                        if st.session_state.get("batch_export_active"):
+                            queue = st.session_state.batch_export_queue
+                            index = st.session_state.batch_export_index
+
+                            if index < len(queue):
+                                next_illustration_id = queue[index]
+
+                                st.info(
+                                    f"Batch export: preparing illustration "
+                                    f"{index + 1} of {len(queue)}"
+                                )
+
+                                st.session_state.batch_export_current_illustration_id = (
+                                    next_illustration_id
+                                )
+
+                                if (
+                                    st.session_state.active_illustration_id
+                                    != next_illustration_id
+                                ):
+                                    st.session_state.pending_illustration_switch = (
+                                        next_illustration_id
+                                    )
+                                    st.rerun()
+
+                                else:
+                                    if (
+                                            st.session_state.get("batch_export_requested_illustration_id")
+                                            != next_illustration_id
+                                    ):
+                                        st.session_state.batch_export_requested_illustration_id = (
+                                            next_illustration_id
+                                        )
+                                        st.session_state.export_request_id = str(uuid.uuid4())
+
+                            else:
+                                if st.session_state.batch_export_images:
+                                    st.session_state.batch_export_zip_bytes = (
+                                        export_illustrations_zip(
+                                            illustrations=st.session_state.batch_export_images,
+                                            bundle_key=st.session_state.batch_export_bundle_key,
+                                        )
+                                    )
+
+                                st.session_state.batch_export_active = False
+
+                                st.success(
+                                    f"Batch export complete: "
+                                    f"{len(st.session_state.batch_export_images)} "
+                                    f"illustrations rendered."
+                                )
+
+                        batch_zip_bytes = st.session_state.get("batch_export_zip_bytes")
+
+                        if batch_zip_bytes is not None:
                             st.download_button(
-                                label="Download Export Package",
-                                data=zip_bytes,
+                                label="Download ZIP",
+                                data=batch_zip_bytes,
                                 file_name=f"{export_base_name}_{export_bundle_key}.zip",
                                 mime="application/zip",
-                                use_container_width=True,
-                            )
-                        else:
-                            st.button(
-                                "Download Export Package",
-                                disabled=True,
                                 use_container_width=True,
                             )
 
                     except Exception as e:
                         st.error(f"Export error: {e}")
                 else:
-                    st.info("Render an illustration first to enable export.")
-
-                project_state = build_project_state(
-                    uploaded_filename=active_filename,
-                    session_state=st.session_state,
-                    raw_image=raw_image,
-                )
-                project_state_bytes = serialize_project_state(project_state)
-
-                st.download_button(
-                    label="Save Project JSON",
-                    data=project_state_bytes,
-                    file_name="illustration_project_state.json",
-                    mime="application/json",
-                    use_container_width=True,
-                )
+                    st.info("Add an illustration to enable export.")
 
             elif section == "Settings":
                 st.subheader("Settings")
@@ -1525,10 +1561,6 @@ def main():
         with col2:
             st.image(normalized_image, caption="Normalized Image (Used for Processing)", width=preview_width)
 
-    if st.session_state.project_state_loaded_notice:
-        st.success("Project state loaded. Re-render the illustration to rebuild the result.")
-        st.session_state.project_state_loaded_notice = False
-
     if both_masks_exist and st.session_state.result_image is None:
         col3, col4 = st.columns([1, 1])
         with col3:
@@ -1543,12 +1575,46 @@ def main():
         workspace_col = st.container()
 
         with workspace_col:
-            st.subheader("Annotation Workspace")
+
+            # Illustration navigation beneath the React editor
+            project_illustrations = st.session_state.helios_project.get(
+                "illustrations", []
+            )
+
+            if project_illustrations:
+
+                navigation_columns = st.columns(
+                    [1] * len(project_illustrations) + [8]
+                )
+
+                for index, illustration in enumerate(project_illustrations):
+                    illustration_id = illustration["illustration_id"]
+                    illustration_name = illustration["name"]
+
+                    is_active = (
+                            illustration_id
+                            == st.session_state.active_illustration_id
+                    )
+
+                    if st.session_state.get("annotation_switch_debug"):
+                        st.write(
+                            "Annotation switch debug:",
+                            st.session_state["annotation_switch_debug"],
+                        )
+
+                    with navigation_columns[index % len(navigation_columns)]:
+                        if st.button(
+                                f"{'● ' if is_active else ''}Image {index + 1}",
+                                key=f"illustration_tile_{illustration_id}",
+                                help=illustration_name,
+                                disabled=is_active,
+                                use_container_width=True,
+                                type="primary" if is_active else "secondary",
+                        ):
+                            st.session_state["pending_illustration_switch"] = illustration_id
+                            st.rerun()
 
             editor_image_src = pil_image_to_data_url(full_result.convert("RGB"))
-
-            # if st.button("Render export from editor"):
-            #     st.session_state.export_request_id = str(uuid.uuid4())
 
             focus_objects_for_editor = (
                 st.session_state.get("locked_focus_objects")
@@ -1566,6 +1632,27 @@ def main():
                 st.session_state.editor_project_key = editor_project_key
                 st.session_state.react_editor_state = None
 
+            # # TEMPORARY DEBUG — state before rendering React
+            # pre_editor_state = st.session_state.get("react_editor_state")
+            #
+            # st.session_state["pre_editor_annotation_debug"] = {
+            #     "lines": (
+            #         len(pre_editor_state.get("lines", []))
+            #         if isinstance(pre_editor_state, dict)
+            #         else None
+            #     ),
+            #     "callouts": (
+            #         len(pre_editor_state.get("callouts", []))
+            #         if isinstance(pre_editor_state, dict)
+            #         else None
+            #     ),
+            #     "project_key": (
+            #         pre_editor_state.get("projectKey")
+            #         if isinstance(pre_editor_state, dict)
+            #         else None
+            #     ),
+            # }
+
             react_editor_state = helios_editor(
                 image_src=editor_image_src,
                 focus_objects=focus_objects_for_editor,
@@ -1578,14 +1665,21 @@ def main():
                 key="helios_react_editor",
             )
 
-            if react_editor_state:
+            if (
+                    isinstance(react_editor_state, dict)
+                    and react_editor_state
+                    and react_editor_state.get("projectKey")
+                    == st.session_state.get("editor_project_key")
+            ):
                 exported_data_url = react_editor_state.get("exportedImageDataUrl")
                 returned_export_id = react_editor_state.get("exportRequestId")
 
                 is_export_response = (
                         exported_data_url
                         and returned_export_id
-                        and returned_export_id != st.session_state.get("last_consumed_export_request_id")
+                        and returned_export_id == st.session_state.get("export_request_id")
+                        and react_editor_state.get("projectKey")
+                        == st.session_state.get("editor_project_key")
                 )
 
                 st.session_state["react_editor_state"] = react_editor_state
@@ -1604,51 +1698,22 @@ def main():
                     )
 
                     st.session_state.final_result_image = exported_image
-
-                    # exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-                    #
-                    # st.session_state.final_result_image = exported_image
                     st.session_state.export_ready = True
                     st.session_state.last_consumed_export_request_id = returned_export_id
                     st.session_state.export_request_id = None
 
+                    if st.session_state.get("batch_export_active"):
+                        st.session_state.batch_export_images.append(
+                            {
+                                "name": f"illustration_{st.session_state.batch_export_index + 1:02d}",
+                                "image": exported_image.copy(),
+                            }
+                        )
+
+                        st.session_state.batch_export_index += 1
+
                     st.success("Export rendered from editor.")
                     st.rerun()
-                else:
-                    # Normal editor update, not an export result
-                    st.session_state.export_ready = False
-
-            exported_data_url = react_editor_state.get("exportedImageDataUrl")
-            returned_export_id = react_editor_state.get("exportRequestId")
-
-            if (
-                    exported_data_url
-                    and returned_export_id
-                    and returned_export_id != st.session_state.get("last_consumed_export_request_id")
-            ):
-                header, encoded = exported_data_url.split(",", 1)
-                image_bytes = base64.b64decode(encoded)
-
-                exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-
-                exported_image = ImageOps.fit(
-                    exported_image,
-                    EXPORT_FINAL_SIZE,
-                    method=Image.Resampling.LANCZOS,
-                    centering=(0.5, 0.5),
-                )
-
-                st.session_state.final_result_image = exported_image
-
-                # exported_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-                #
-                # st.session_state.final_result_image = exported_image
-                st.session_state.last_consumed_export_request_id = returned_export_id
-
-                st.session_state.export_ready = True
-
-                st.success("Export rendered from editor.")
-
 
 if __name__ == "__main__":
     main()

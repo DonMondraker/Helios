@@ -40,7 +40,7 @@ def helios_editor(
         debug=debug,
         default={},
         key=key,
-        height=1200,
+        height=850,
         pendingInsetAsset=pending_inset_asset,
         exportRequestId=export_request_id,
         projectKey=project_key,

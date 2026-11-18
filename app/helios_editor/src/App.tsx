@@ -725,11 +725,16 @@ function App({
         try {
           Streamlit.setComponentValue({
             ...getEditorState(),
+            projectKey: projectKey ?? "default",
             selectedObjectId: previousSelection,
             exportedImageDataUrl: dataUrl,
             exportRequestId,
           });
-        } catch {}
+
+          console.log("[Helios export] setComponentValue returned");
+        } catch (error) {
+          console.error("[Helios export] Failed to send", error);
+        }
       });
     });
   }, [
@@ -818,6 +823,38 @@ function App({
     hydratedProjectKeyRef.current = activeProjectKey;
     isHydratingInitialStateRef.current = false;
   }, [imageSrc, projectKey, initialState, editorStorageKey]);
+
+  // Send editor changes to Streamlit after editing settles.
+  useEffect(() => {
+    const activeProjectKey = projectKey ?? "default";
+
+    if (hydratedProjectKeyRef.current !== activeProjectKey) return;
+    if (isHydratingInitialStateRef.current) return;
+    if (exportRequestId) return;
+
+    const timeout = window.setTimeout(() => {
+      try {
+        Streamlit.setComponentValue({
+          ...getEditorState(),
+          projectKey: activeProjectKey,
+        });
+      } catch {
+        // Editor may be running standalone in Vite.
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    projectKey,
+    exportRequestId,
+    lines,
+    callouts,
+    insets,
+    insetImages,
+    overlayImages,
+    focusObjects,
+    selectedObjectId,
+  ]);
 
   useEffect(() => {
     const updateScale = () => {
@@ -2103,6 +2140,7 @@ function StreamlitAppWrapper() {
 
   return (
     <App
+      key={args.projectKey ?? "default"}
       imageSrc={args.imageSrc}
       debug={args.debug ?? false}
       initialState={args.initialState}

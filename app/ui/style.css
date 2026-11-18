@@ -14,7 +14,7 @@ h1 {
     color: #fafafa !important;
 }
 
-h2, h3, h4, p, label, span {
+h2, h3, h4, p, label {
     font-family: 'Inter', sans-serif !important;
 }
 
@@ -284,4 +284,9 @@ iframe {
     outline: 0 !important;
     box-shadow: none !important;
     background: #222222 !important;
+}
+
+/* Hide the uploaded-file name row beneath file uploaders */
+[data-testid="stFileUploaderFile"] {
+    display: none !important;
 }

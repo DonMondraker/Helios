@@ -107,48 +107,41 @@ def export_image_bytes(image: Image.Image, preset_key: str) -> tuple[bytes, str,
     output.seek(0)
     return output.getvalue(), mime, extension
 
-
-def build_export_filename(base_name: str, preset_key: str, extension: str) -> str:
-    safe_base = base_name.strip().replace(" ", "_") or "illustration"
-    return f"{safe_base}_{preset_key}.{extension}"
-
-
-def get_export_dimensions(image: Image.Image, preset_key: str) -> tuple[int, int]:
-    processed, _ = prepare_image_for_export(image, preset_key)
-    return processed.size
-
-
-def export_bundle_zip(
-        final_image: Image.Image,
-        raw_image: Image.Image,
-        project_state_bytes: bytes,
-        base_name: str,
+def export_illustrations_zip(
+        illustrations: list[dict],
         bundle_key: str,
 ) -> bytes:
+    """
+    Export multiple completed illustrations into one ZIP.
+
+    Each illustration must contain:
+        name: str
+        image: PIL.Image.Image
+    """
     zip_buffer = io.BytesIO()
     bundle = EXPORT_BUNDLES[bundle_key]
 
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-        folder = base_name
+    with zipfile.ZipFile(
+            zip_buffer, "w", zipfile.ZIP_DEFLATED
+    ) as zipf:
 
-        for preset_key in bundle["presets"]:
-            file_bytes, mime, extension = export_image_bytes(final_image, preset_key)
-            zipf.writestr(
-                f"{folder}/{base_name}_{preset_key}.{extension}",
-                file_bytes,
-            )
+        for index, illustration in enumerate(illustrations, start=1):
+            image = illustration["image"]
 
-        # cad_buffer = io.BytesIO()
-        # raw_image.save(cad_buffer, format="PNG")
-        # zipf.writestr(
-        #     f"{folder}/{base_name}_original_cad.png",
-        #     cad_buffer.getvalue(),
-        # )
+            # Numbering ensures unique filenames even when names repeat.
+            base_name = f"illustration_{index:02d}"
 
-        zipf.writestr(
-            f"{folder}/{base_name}_project.json",
-            project_state_bytes,
-        )
+            for preset_key in bundle["presets"]:
+                file_bytes, _, extension = export_image_bytes(
+                    image,
+                    preset_key,
+                )
+
+                filename = (
+                    f"{base_name}_{preset_key}.{extension}"
+                )
+
+                zipf.writestr(filename, file_bytes)
 
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
