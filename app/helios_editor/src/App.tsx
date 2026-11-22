@@ -503,6 +503,8 @@ function App({
 
   const [overlayImages, setOverlayImages] = useState<EditorOverlayImage[]>([]);
 
+  const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
+
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   const [scale, setScale] = useState(1);
@@ -603,6 +605,64 @@ function App({
       y: pointer.y / scale,
     };
   };
+
+
+  const handleCanvasDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragOverCanvas(true);
+  };
+
+  const handleCanvasDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsDragOverCanvas(false);
+    }
+  };
+
+  const handleCanvasDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragOverCanvas(false);
+
+    const files = Array.from(event.dataTransfer.files).filter((file) =>
+      file.type.startsWith("image/")
+    );
+
+    if (files.length === 0) return;
+
+    const readers = files.map(
+      (file) =>
+        new Promise<{ name: string; dataUrl: string }>((resolve, reject) => {
+          const reader = new FileReader();
+
+          reader.onload = () => {
+            if (typeof reader.result === "string") {
+              resolve({ name: file.name, dataUrl: reader.result });
+            } else {
+              reject(new Error(`Could not read ${file.name}`));
+            }
+          };
+
+          reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+          reader.readAsDataURL(file);
+        })
+    );
+
+    Promise.all(readers)
+      .then((images) => {
+        Streamlit.setComponentValue({
+          event: "image_drop",
+          eventId: `${Date.now()}_${Math.random()}`,
+          projectKey: projectKey ?? "default",
+          files: images,
+        });
+      })
+      .catch((error) => {
+        console.error("[Helios image drop] Failed to read files:", error);
+      });
+  };
+
 
   const handleOverlayFileSelected = (
     event: React.ChangeEvent<HTMLInputElement>
@@ -1072,6 +1132,9 @@ function App({
       >
         <div
           ref={canvasContainerRef}
+          onDragOver={handleCanvasDragOver}
+          onDragLeave={handleCanvasDragLeave}
+          onDrop={handleCanvasDrop}
           style={{
             flex: "1 1 0",
             minWidth: 0,
@@ -1858,9 +1921,30 @@ function App({
                 })}
               </Layer>
           </Stage>
+          {isDragOverCanvas && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                border: "3px dashed #4da3ff",
+                background: "rgba(77, 163, 255, 0.12)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                zIndex: 100,
+                color: "#ffffff",
+                fontSize: 20,
+                fontWeight: 600,
+              }}
+            >
+              Drop images to add illustrations
+            </div>
+          )}
         </div>
         <div
           style={{
+            position: "relative",
             width: 280,
             background: "#1c1d1d",
             border: "none",

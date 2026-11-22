@@ -621,6 +621,96 @@ def persist_active_project(session_state) -> bool:
     return True
 
 
+def process_dropped_images(session_state, dropped_files: list) -> None:
+    """
+    Validate and add images received from the React editor.
+    The last dropped image becomes the active illustration.
+    """
+    validated_images = []
+
+    if not isinstance(dropped_files, list) or not dropped_files:
+        raise ValueError("No image files were received.")
+
+    if len(dropped_files) > 10:
+        raise ValueError("You can drop a maximum of 10 images at once.")
+
+    for item in dropped_files:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid image data received.")
+
+        filename = item.get("name")
+        data_url = item.get("dataUrl")
+
+        if not isinstance(filename, str) or not filename.strip():
+            raise ValueError("An image is missing its filename.")
+
+        if not isinstance(data_url, str) or not data_url.startswith(
+                "data:image/"
+        ):
+            raise ValueError(f"{filename} is not a valid image data URL.")
+
+        try:
+            header, encoded = data_url.split(",", 1)
+            image_bytes = base64.b64decode(encoded, validate=True)
+
+            if len(image_bytes) > 25 * 1024 * 1024:
+                raise ValueError(f"{filename} exceeds the 25 MB size limit.")
+
+            image = Image.open(BytesIO(image_bytes))
+            image.verify()
+
+            image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+        except Exception as exc:
+            raise ValueError(f"Could not read {filename}: {exc}") from exc
+
+        validated_images.append((filename, image, image_bytes))
+
+    project = session_state.get("helios_project")
+
+    if project is None:
+        raise ValueError("No active Helios project is available.")
+
+    if session_state.get("active_illustration_id") is not None:
+        if not persist_active_project(session_state):
+            raise RuntimeError("Could not save the current illustration.")
+
+    session_state.library_source_active = False
+
+    for filename, image, image_bytes in validated_images:
+        illustration_state = {
+            "source": {
+                "filename": filename,
+                "image_b64": encode_image(image),
+            },
+            "masks": {
+                "focus_mask_b64": None,
+                "context_mask_b64": None,
+            },
+            "annotations": {
+                "react_editor_state": None,
+            },
+        }
+
+        illustration_id = add_illustration(
+            project,
+            filename,
+            illustration_state,
+        )
+
+        session_state.active_illustration_id = illustration_id
+        session_state.editor_project_key = f"illustration_{illustration_id}"
+        session_state.uploaded_image_bytes = image_bytes
+        session_state.uploaded_image_filename = filename
+
+        restore_illustration_state(session_state, illustration_state)
+
+    session_state.illustration_count_debug = len(project["illustrations"])
+
+    if not persist_active_project(session_state):
+        raise RuntimeError("Could not save the dropped illustrations.")
+
+
 def pil_image_to_data_url(image: Image.Image) -> str:
     import io
 
@@ -1115,18 +1205,6 @@ def main():
         with open(path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
 
-    logo_base64 = get_base64_image("app/ui/assets/helios_logo_small.png")
-
-    st.markdown(
-        f"""
-        <div class="app-header">
-            <img src="data:image/png;base64,{logo_base64}" class="app-logo"/>
-            <div class="app-version">v{version}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
     defaults = {
     	"helios_project": None,
     	"active_illustration_id": None,
@@ -1342,99 +1420,25 @@ def main():
                     f"illustration_{pending_switch}"
                 )
 
+    if not st.session_state.workspace_open:
+        logo_base64 = get_base64_image(
+            "app/ui/assets/helios_logo_small.png"
+        )
+
+        st.markdown(
+            f"""
+            <div class="app-header">
+                <img src="data:image/png;base64,{logo_base64}" class="app-logo"/>
+                <div class="app-version">v{version}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # Show project selection until a workspace is opened.
     if not st.session_state.workspace_open:
         render_project_startup()
         st.stop()
-
-
-    uploaded_files = st.file_uploader(
-        "Upload images",
-        type=["png", "jpg", "jpeg"],
-        accept_multiple_files=True,
-        key="startup_image_upload",
-        label_visibility="visible",
-    )
-
-    if uploaded_files:
-
-        batch_hasher = hashlib.sha256()
-
-        for batch_file in uploaded_files:
-            batch_hasher.update(batch_file.name.encode("utf-8"))
-            batch_hasher.update(batch_file.getvalue())
-
-        current_batch_hash = batch_hasher.hexdigest()
-
-        # uploaded_file = uploaded_files[0]
-        # image_bytes = uploaded_file.getvalue()
-        # current_image_hash = hashlib.sha256(image_bytes).hexdigest()
-
-        if st.session_state.last_uploaded_batch_hash != current_batch_hash:
-            # Preserve the previous illustration before activating the batch
-            if st.session_state.get("active_illustration_id") is not None:
-                save_active_illustration_state(st.session_state)
-
-            st.session_state.library_source_active = False
-
-            for uploaded_file in uploaded_files:
-                image_bytes = uploaded_file.getvalue()
-                st.session_state.uploaded_image_bytes = image_bytes
-                st.session_state.uploaded_image_filename = uploaded_file.name
-
-                # Register the uploaded image in the Helios 2.0 project
-                uploaded_raw_image = Image.open(
-                    BytesIO(image_bytes)
-                ).convert("RGB")
-
-                illustration_state = {
-                    "source": {
-                        "filename": uploaded_file.name,
-                        "image_b64": encode_image(uploaded_raw_image),
-                    },
-                    "masks": {
-                        "focus_mask_b64": None,
-                        "context_mask_b64": None,
-                    },
-                    "annotations": {
-                        "react_editor_state": None,
-                    },
-                }
-
-                illustration_id = add_illustration(
-                    st.session_state.helios_project,
-                    uploaded_file.name,
-                    illustration_state,
-                )
-
-                st.session_state.active_illustration_id = illustration_id
-
-                st.session_state["illustration_count_debug"] = len(
-                    st.session_state.helios_project["illustrations"]
-                )
-
-                # Each illustration gets its own React editor identity
-                st.session_state.editor_project_key = f"illustration_{illustration_id}"
-
-                # Clear the previous editor state for the new illustration
-                st.session_state.react_editor_state = None
-
-            st.session_state.last_uploaded_batch_hash = current_batch_hash
-
-            # Persist the project immediately after adding the illustration.
-            try:
-                save_project(st.session_state.helios_project)
-            except Exception as exc:
-                st.error(
-                    f"Could not save the newly added illustration to SQLite: {exc}"
-                )
-                st.stop()
-
-            st.rerun()
-
-    else:
-        st.session_state.last_uploaded_batch_hash = None
 
     if st.session_state.get("library_source_active", False):
         raw_image = st.session_state.original_image
@@ -1489,6 +1493,22 @@ def main():
     full_result = st.session_state.get("result_image")
 
     with st.sidebar:
+
+        sidebar_logo_base64 = get_base64_image(
+            "app/ui/assets/helios_logo_small.png"
+        )
+
+        st.markdown(
+            f"""
+                <div style="display: flex; justify-content: center; padding: 4px 0 16px 0;">
+                    <img
+                        src="data:image/png;base64,{sidebar_logo_base64}"
+                        style="width: 150px; max-width: 100%; height: auto;"
+                    />
+                </div>
+                """,
+            unsafe_allow_html=True,
+        )
 
         if st.button(
                 "Main Menu",
@@ -2070,7 +2090,7 @@ def main():
             st.image(st.session_state.context_mask, caption="Context Mask", width=preview_width)
 
     if full_result is not None:
-        st.markdown("---")
+        # st.markdown("---")
 
         st.markdown('<div class="annotation-preview-layout">', unsafe_allow_html=True)
         workspace_col = st.container()
@@ -2097,7 +2117,7 @@ def main():
                         )
 
                     navigation_columns = st.columns(
-                        [1] * len(project_illustrations) + [7, 1]
+                        [1.4] * len(project_illustrations) + [7, 1]
                     )
 
                 manage_navigation_col = navigation_columns[-1]
@@ -2418,27 +2438,6 @@ def main():
                 st.session_state.editor_project_key = editor_project_key
                 st.session_state.react_editor_state = None
 
-            # # TEMPORARY DEBUG — state before rendering React
-            # pre_editor_state = st.session_state.get("react_editor_state")
-            #
-            # st.session_state["pre_editor_annotation_debug"] = {
-            #     "lines": (
-            #         len(pre_editor_state.get("lines", []))
-            #         if isinstance(pre_editor_state, dict)
-            #         else None
-            #     ),
-            #     "callouts": (
-            #         len(pre_editor_state.get("callouts", []))
-            #         if isinstance(pre_editor_state, dict)
-            #         else None
-            #     ),
-            #     "project_key": (
-            #         pre_editor_state.get("projectKey")
-            #         if isinstance(pre_editor_state, dict)
-            #         else None
-            #     ),
-            # }
-
             react_editor_state = helios_editor(
                 image_src=editor_image_src,
                 focus_objects=focus_objects_for_editor,
@@ -2450,6 +2449,31 @@ def main():
                 project_key=st.session_state.editor_project_key,
                 key="helios_react_editor",
             )
+
+            if (
+                    isinstance(react_editor_state, dict)
+                    and react_editor_state.get("event") == "image_drop"
+                    and react_editor_state.get("projectKey")
+                    == st.session_state.get("editor_project_key")
+            ):
+                    event_id = react_editor_state.get("eventId")
+                    last_event_id = st.session_state.get(
+                        "last_processed_image_drop_event_id"
+                    )
+
+                    if event_id and event_id != last_event_id:
+                        st.session_state.last_processed_image_drop_event_id = event_id
+
+                        try:
+                            process_dropped_images(
+                                st.session_state,
+                                react_editor_state.get("files"),
+                            )
+                            st.success("Dropped images added to the project.")
+                        except Exception as exc:
+                            st.error(f"Could not add dropped images: {exc}")
+
+                        st.rerun()
 
             if (
                     isinstance(react_editor_state, dict)

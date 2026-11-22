@@ -290,3 +290,8 @@ iframe {
 [data-testid="stFileUploaderFile"] {
     display: none !important;
 }
+
+/* Reduce top spacing in the main workspace */
+[data-testid="stMainBlockContainer"] {
+    padding-top: 0.5rem !important;
+}
