@@ -58,21 +58,102 @@ def get_illustration(
             return illustration
 
     return None
-    
-    
+
+
+def rename_illustration(
+        project: dict,
+        illustration_id: str,
+        new_name: str,
+) -> bool:
+    """Rename an illustration without changing its ID or state."""
+    illustration = get_illustration(project, illustration_id)
+
+    if illustration is None:
+        return False
+
+    new_name = new_name.strip()
+
+    if not new_name:
+        return False
+
+    illustration["name"] = new_name
+    return True
+
+
+def duplicate_illustration(
+        project: dict,
+        illustration_id: str,
+) -> str | None:
+    """
+    Duplicate an illustration with a new ID and independent state.
+
+    Returns the new illustration ID, or None if the original
+    illustration does not exist.
+    """
+    original = get_illustration(project, illustration_id)
+
+    if original is None:
+        return None
+
+    duplicate_name = f"{original['name']} (Copy)"
+
+    return add_illustration(
+        project,
+        duplicate_name,
+        original["state"],
+    )
+
+
+def move_illustration(
+        project: dict,
+        illustration_id: str,
+        direction: int,
+) -> bool:
+    """
+    Move an illustration one position left (-1) or right (+1).
+
+    Returns True if moved, False if the move is not possible.
+    """
+    if direction not in (-1, 1):
+        return False
+
+    illustrations = project["illustrations"]
+
+    for index, illustration in enumerate(illustrations):
+        if illustration["illustration_id"] == illustration_id:
+            new_index = index + direction
+
+            if not 0 <= new_index < len(illustrations):
+                return False
+
+            illustrations[index], illustrations[new_index] = (
+                illustrations[new_index],
+                illustrations[index],
+            )
+            return True
+
+    return False
+
+
 def remove_illustration(
-    project: dict,
-    illustration_id: str,
+        project: dict,
+        illustration_id: str,
 ) -> bool:
     """
     Remove an illustration from the project.
 
-    Returns True if an illustration was removed,
-    or False if the ID was not found.
+    Returns False if the illustration does not exist
+    or if it is the project's last remaining illustration.
     """
-    for index, illustration in enumerate(project["illustrations"]):
+    illustrations = project["illustrations"]
+
+    # A project must always contain at least one illustration.
+    if len(illustrations) <= 1:
+        return False
+
+    for index, illustration in enumerate(illustrations):
         if illustration["illustration_id"] == illustration_id:
-            project["illustrations"].pop(index)
+            illustrations.pop(index)
             return True
 
     return False

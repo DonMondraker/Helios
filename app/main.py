@@ -6,6 +6,7 @@ import math
 import base64
 import cv2
 import uuid
+from uuid import uuid4
 from io import BytesIO
 from copy import deepcopy
 
@@ -40,6 +41,15 @@ from project_state.project_model import (
     decode_image,
     update_illustration_fields,
     get_illustration,
+    rename_illustration,
+    duplicate_illustration,
+    move_illustration,
+    remove_illustration,
+)
+from project_state.project_repository import (
+    save_project,
+    list_projects,
+    load_project,
 )
 from project_state.project_file import (
     save_project_file,
@@ -584,6 +594,33 @@ def save_active_illustration_state(session_state) -> bool:
         fields,
     )
 
+
+def persist_active_project(session_state) -> bool:
+    """
+    Capture the active illustration and persist the
+    complete Helios project to SQLite.
+    """
+    project = session_state.get("helios_project")
+
+    if project is None:
+        return False
+
+    illustration_id = session_state.get("active_illustration_id")
+
+    if illustration_id is not None:
+        if not save_active_illustration_state(session_state):
+            return False
+
+    try:
+        save_project(project)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return False
+
+    return True
+
+
 def pil_image_to_data_url(image: Image.Image) -> str:
     import io
 
@@ -880,6 +917,193 @@ def combine_masks(*masks: Image.Image | None) -> Image.Image | None:
     return Image.fromarray(combined, mode="L")
 
 
+
+def render_project_startup():
+    """Display the Helios project startup screen."""
+
+    st.title("Welcome to Helios")
+    st.caption("Your persistent technical illustration workspace")
+
+
+
+    st.subheader("New Project")
+
+    new_project_image = st.file_uploader(
+        "Upload your first illustration",
+        type=["png", "jpg", "jpeg"],
+        key="new_project_first_illustration",
+        help="Upload an illustration to create a new Helios project.",
+    )
+
+
+    if new_project_image is not None:
+        try:
+            image_bytes = new_project_image.getvalue()
+            source_image = Image.open(
+                BytesIO(image_bytes)
+            ).convert("RGB")
+            source_image.load()
+        except Exception as exc:
+            st.error(f"Could not read illustration: {exc}")
+        else:
+            new_project = create_empty_project()
+
+            illustration_state = {
+                "source": {
+                    "filename": new_project_image.name,
+                    "image_b64": encode_image(source_image),
+                },
+                "masks": {
+                    "focus_mask_b64": None,
+                    "context_mask_b64": None,
+                },
+                "annotations": {
+                    "react_editor_state": None,
+                },
+            }
+
+            add_illustration(
+                new_project,
+                new_project_image.name,
+                illustration_state,
+            )
+
+            try:
+                save_project(new_project)
+            except Exception as exc:
+                st.error(f"Could not save new project: {exc}")
+            else:
+                st.session_state.pending_loaded_project = new_project
+                st.session_state.pending_project_activation = True
+                st.session_state.workspace_open = True
+                st.rerun()
+
+
+
+
+    st.subheader("Import Helios Project")
+
+    imported_project_file = st.file_uploader(
+        "Select a .helios project file",
+        type=["helios"],
+        key="startup_import_helios",
+        help="Import an editable Helios project into your workspace.",
+    )
+
+    if imported_project_file is not None:
+        try:
+            imported_project = load_project_file(
+                imported_project_file.getvalue()
+            )
+        except ValueError as exc:
+            st.error(f"Could not import Helios project: {exc}")
+
+
+        else:
+            try:
+                existing_project = load_project(
+                    imported_project["project_id"]
+                )
+            except Exception as exc:
+                st.error(
+                    f"Could not check the project database: {exc}"
+                )
+                st.session_state.pop(
+                    "startup_import_candidate", None
+                )
+            else:
+                st.session_state["startup_import_candidate"] = (
+                    imported_project
+                )
+
+                if existing_project is not None:
+                    st.warning(
+                        "A project with this ID already exists in Helios. "
+                        "Importing will create a separate copy, "
+                        "leaving the existing project unchanged."
+                    )
+                else:
+                    st.success(
+                        f"Project validated: "
+                        f"{len(imported_project['illustrations'])} illustrations."
+                    )
+
+
+    import_candidate = st.session_state.get(
+        "startup_import_candidate"
+    )
+
+    if import_candidate is not None:
+        if st.button(
+                "Import Project",
+                key="confirm_startup_import",
+                use_container_width=True,
+        ):
+            imported_copy = deepcopy(import_candidate)
+            imported_copy["project_id"] = str(uuid4())
+
+            try:
+                save_project(imported_copy)
+            except Exception as exc:
+                st.error(f"Could not save imported project: {exc}")
+            else:
+                st.session_state.pop(
+                    "startup_import_candidate", None
+                )
+                st.session_state.pending_loaded_project = imported_copy
+                st.session_state.pending_project_activation = True
+                st.session_state.workspace_open = True
+                st.rerun()
+
+    st.subheader("Recent Projects")
+
+    try:
+        projects = list_projects()
+    except Exception as exc:
+        st.error(f"Could not load saved projects: {exc}")
+        return
+
+    if not projects:
+        st.info(
+            "No saved projects yet. "
+            "Create a new project to get started."
+        )
+        return
+
+    for project in projects:
+        with st.container(border=True):
+            st.markdown(f"**{project['project_name']}**")
+            st.caption(
+                f"Last updated: {project['updated_at']}"
+            )
+
+            if st.button(
+                    "Open Project",
+                    key=f"open_project_{project['project_id']}",
+            ):
+                try:
+                    loaded_project = load_project(
+                        project["project_id"]
+                    )
+
+                    if loaded_project is None:
+                        st.error(
+                            "This project could not be found."
+                        )
+                    else:
+                        st.session_state.pending_loaded_project = (
+                            loaded_project
+                        )
+                        st.session_state.pending_project_activation = True
+                        st.session_state.workspace_open = True
+                        st.rerun()
+
+                except Exception as exc:
+                    st.error(
+                        f"Could not open project: {exc}"
+                    )
+
+
 def main():
 
     st.set_page_config(page_title="Helios", layout="wide")
@@ -906,6 +1130,7 @@ def main():
     defaults = {
     	"helios_project": None,
     	"active_illustration_id": None,
+        "workspace_open": False,
         "focus_mask": None,
         "context_mask": None,
         "result_image": None,
@@ -918,6 +1143,7 @@ def main():
         "uploaded_image_bytes": None,
         "uploaded_image_filename": None,
         "last_uploaded_image_hash": None,
+        "last_uploaded_batch_hash": None,
         "ai_notes": [],
         "ai_strategy": None,
         "ai_annotation_suggestions": None,
@@ -940,7 +1166,7 @@ def main():
         "background_threshold": 180,
         "enhance_focus": True,
         "enhance_contour": True,
-        "sidebar_section": "Project",
+        "sidebar_section": "Render",
         "export_request_id": None,
         "last_consumed_export_request_id": None,
         "export_ready": False,
@@ -965,6 +1191,32 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = value
 
+
+    # Restore the active project after a browser refresh.
+    project_id_from_url = st.query_params.get("project")
+
+    if (
+            project_id_from_url
+            and not st.session_state.workspace_open
+    ):
+        try:
+            restored_project = load_project(project_id_from_url)
+        except Exception as exc:
+            st.error(
+                f"Could not restore the project from the URL: {exc}"
+            )
+        else:
+            if restored_project is None:
+                st.warning(
+                    "The project in this URL could not be found. "
+                    "Please select a project from the main menu."
+                )
+            else:
+                st.session_state.pending_loaded_project = restored_project
+                st.session_state.pending_project_activation = True
+                st.session_state.workspace_open = True
+
+
     # Helios 2.0 project initialization
     if st.session_state.helios_project is None:
         st.session_state.helios_project = create_empty_project()
@@ -981,6 +1233,9 @@ def main():
             st.session_state.helios_project = loaded_project
             st.session_state.pending_loaded_project = None
 
+            # Remember the active project in the browser URL.
+            st.query_params["project"] = loaded_project["project_id"]
+
             # Prevent an old pending switch from interfering.
             st.session_state.pending_illustration_switch = None
 
@@ -989,20 +1244,26 @@ def main():
             st.session_state.uploaded_image_bytes = None
             st.session_state.uploaded_image_filename = None
 
-            # Keep the current uploader's image marked as processed,
+            # Keep the current uploader batch marked as processed,
             # so it cannot be added again to the loaded project.
-            existing_upload = st.session_state.get(
+            existing_uploads = st.session_state.get(
                 "startup_image_upload"
             )
 
-            if existing_upload is not None:
-                st.session_state.last_uploaded_image_hash = (
-                    hashlib.sha256(
-                        existing_upload.getvalue()
-                    ).hexdigest()
+            if existing_uploads:
+                batch_hasher = hashlib.sha256()
+
+                for existing_upload in existing_uploads:
+                    batch_hasher.update(
+                        existing_upload.name.encode("utf-8")
+                    )
+                    batch_hasher.update(existing_upload.getvalue())
+
+                st.session_state.last_uploaded_batch_hash = (
+                    batch_hasher.hexdigest()
                 )
             else:
-                st.session_state.last_uploaded_image_hash = None
+                st.session_state.last_uploaded_batch_hash = None
 
             # Clear any previously prepared downloads.
             st.session_state.helios_project_file_bytes = None
@@ -1057,131 +1318,123 @@ def main():
         )
 
         if selected_illustration is not None:
-            save_active_illustration_state(st.session_state)
-
-            st.session_state.active_illustration_id = pending_switch
-
-            restore_illustration_state(
-                st.session_state,
-                selected_illustration["state"],
-            )
-
-            st.session_state.library_source_active = True
-            st.session_state.library_source_filename = (
-                selected_illustration["state"]
-                .get("source", {})
-                .get("filename", selected_illustration["name"])
-            )
-
-            st.session_state.editor_project_key = (
-                f"illustration_{pending_switch}"
-            )
-
-    # st.markdown("### Start Project")
-
-
-    uploaded_project_file = st.file_uploader(
-        "Open Helios Project",
-        type=["helios"],
-        key="startup_project_upload",
-        help="Open a previously saved editable Helios project.",
-    )
-
-
-    if uploaded_project_file is not None:
-        project_bytes = uploaded_project_file.getvalue()
-        project_hash = hashlib.sha256(project_bytes).hexdigest()
-
-        if st.session_state.get("last_loaded_project_hash") != project_hash:
-            try:
-                loaded_project = load_project_file(project_bytes)
-            except ValueError as exc:
-                st.error(f"Could not open Helios project: {exc}")
+            if not persist_active_project(st.session_state):
+                st.error(
+                    "Could not save the current project. "
+                    "Illustration switching was cancelled to protect your work."
+                )
             else:
-                st.session_state.pending_loaded_project = loaded_project
-                st.session_state.last_loaded_project_hash = project_hash
-                st.success(
-                    f"Project file validated: "
-                    f"{len(loaded_project['illustrations'])} illustrations."
+                st.session_state.active_illustration_id = pending_switch
+
+                restore_illustration_state(
+                    st.session_state,
+                    selected_illustration["state"],
+                )
+
+                st.session_state.library_source_active = True
+                st.session_state.library_source_filename = (
+                    selected_illustration["state"]
+                    .get("source", {})
+                    .get("filename", selected_illustration["name"])
+                )
+
+                st.session_state.editor_project_key = (
+                    f"illustration_{pending_switch}"
                 )
 
 
-
-    pending_project = st.session_state.get("pending_loaded_project")
-
-    if pending_project is not None:
-        st.info(
-            f"Ready to open: {pending_project['project_name']} "
-            f"({len(pending_project['illustrations'])} illustrations)"
-        )
-
-        if st.button(
-                "Open Validated Project",
-                use_container_width=True,
-        ):
-            st.session_state.pending_project_activation = True
-            st.rerun()
+    # Show project selection until a workspace is opened.
+    if not st.session_state.workspace_open:
+        render_project_startup()
+        st.stop()
 
 
-
-    uploaded_file = st.file_uploader(
-        "Upload image",
+    uploaded_files = st.file_uploader(
+        "Upload images",
         type=["png", "jpg", "jpeg"],
+        accept_multiple_files=True,
         key="startup_image_upload",
         label_visibility="visible",
     )
 
-    if uploaded_file is not None:
-        image_bytes = uploaded_file.getvalue()
-        current_image_hash = hashlib.sha256(image_bytes).hexdigest()
+    if uploaded_files:
 
-        if st.session_state.last_uploaded_image_hash != current_image_hash:
-            # Preserve the previous illustration before activating a new one
+        batch_hasher = hashlib.sha256()
+
+        for batch_file in uploaded_files:
+            batch_hasher.update(batch_file.name.encode("utf-8"))
+            batch_hasher.update(batch_file.getvalue())
+
+        current_batch_hash = batch_hasher.hexdigest()
+
+        # uploaded_file = uploaded_files[0]
+        # image_bytes = uploaded_file.getvalue()
+        # current_image_hash = hashlib.sha256(image_bytes).hexdigest()
+
+        if st.session_state.last_uploaded_batch_hash != current_batch_hash:
+            # Preserve the previous illustration before activating the batch
             if st.session_state.get("active_illustration_id") is not None:
                 save_active_illustration_state(st.session_state)
+
             st.session_state.library_source_active = False
-            st.session_state.uploaded_image_bytes = image_bytes
-            st.session_state.uploaded_image_filename = uploaded_file.name
-            st.session_state.last_uploaded_image_hash = current_image_hash
 
-            # Register the uploaded image in the Helios 2.0 project
-            uploaded_raw_image = Image.open(
-                BytesIO(image_bytes)
-            ).convert("RGB")
+            for uploaded_file in uploaded_files:
+                image_bytes = uploaded_file.getvalue()
+                st.session_state.uploaded_image_bytes = image_bytes
+                st.session_state.uploaded_image_filename = uploaded_file.name
 
-            illustration_state = {
-                "source": {
-                    "filename": uploaded_file.name,
-                    "image_b64": encode_image(uploaded_raw_image),
-                },
-                "masks": {
-                    "focus_mask_b64": None,
-                    "context_mask_b64": None,
-                },
-                "annotations": {
-                    "react_editor_state": None,
-                },
-            }
+                # Register the uploaded image in the Helios 2.0 project
+                uploaded_raw_image = Image.open(
+                    BytesIO(image_bytes)
+                ).convert("RGB")
 
-            illustration_id = add_illustration(
-                st.session_state.helios_project,
-                uploaded_file.name,
-                illustration_state,
-            )
+                illustration_state = {
+                    "source": {
+                        "filename": uploaded_file.name,
+                        "image_b64": encode_image(uploaded_raw_image),
+                    },
+                    "masks": {
+                        "focus_mask_b64": None,
+                        "context_mask_b64": None,
+                    },
+                    "annotations": {
+                        "react_editor_state": None,
+                    },
+                }
 
-            st.session_state.active_illustration_id = illustration_id
+                illustration_id = add_illustration(
+                    st.session_state.helios_project,
+                    uploaded_file.name,
+                    illustration_state,
+                )
 
-            st.session_state["illustration_count_debug"] = len(
-                st.session_state.helios_project["illustrations"]
-            )
+                st.session_state.active_illustration_id = illustration_id
 
-            # Each illustration gets its own React editor identity
-            st.session_state.editor_project_key = f"illustration_{illustration_id}"
+                st.session_state["illustration_count_debug"] = len(
+                    st.session_state.helios_project["illustrations"]
+                )
 
-            # Clear the previous editor state for the new illustration
-            st.session_state.react_editor_state = None
+                # Each illustration gets its own React editor identity
+                st.session_state.editor_project_key = f"illustration_{illustration_id}"
+
+                # Clear the previous editor state for the new illustration
+                st.session_state.react_editor_state = None
+
+            st.session_state.last_uploaded_batch_hash = current_batch_hash
+
+            # Persist the project immediately after adding the illustration.
+            try:
+                save_project(st.session_state.helios_project)
+            except Exception as exc:
+                st.error(
+                    f"Could not save the newly added illustration to SQLite: {exc}"
+                )
+                st.stop()
 
             st.rerun()
+
+    else:
+        st.session_state.last_uploaded_batch_hash = None
 
     if st.session_state.get("library_source_active", False):
         raw_image = st.session_state.original_image
@@ -1237,16 +1490,58 @@ def main():
 
     with st.sidebar:
 
+        if st.button(
+                "Main Menu",
+                key="return_to_main_menu",
+                use_container_width=True,
+        ):
+            if not persist_active_project(st.session_state):
+                st.error(
+                    "Could not save the current project. "
+                    "Returning to the main menu was cancelled."
+                )
+            else:
+                st.session_state.workspace_open = False
+                st.session_state.pending_loaded_project = None
+                st.session_state.pending_project_activation = False
+                # Explicitly leave the current project.
+                st.query_params.pop("project", None)
+                st.rerun()
+
+        st.divider()
+
         # -------------------------
         # PHASE 1: MASK CREATION
-        # -------------------------
         if not both_masks_exist:
 
             st.subheader("Mask Extraction")
 
-            st.slider("Hue tolerance", 5, 40, key="hue_tolerance")
-            st.slider("Minimum saturation", 10, 255, key="min_saturation")
-            st.slider("Minimum brightness", 0, 255, key="min_value")
+            st.slider(
+                "Hue tolerance",
+                5,
+                40,
+                key="hue_tolerance",
+                on_change=persist_active_project,
+                args=(st.session_state,),
+            )
+
+            st.slider(
+                "Minimum saturation",
+                10,
+                255,
+                key="min_saturation",
+                on_change=persist_active_project,
+                args=(st.session_state,),
+            )
+
+            st.slider(
+                "Minimum brightness",
+                0,
+                255,
+                key="min_value",
+                on_change=persist_active_project,
+                args=(st.session_state,),
+            )
 
             if st.button("Generate Masks", use_container_width=True):
                 focus_mask = create_color_mask(
@@ -1313,6 +1608,14 @@ def main():
 
                 st.session_state.sidebar_section = "Render"
 
+                # Persist the generated masks and updated workflow state.
+                if not persist_active_project(st.session_state):
+                    st.error(
+                        "Could not save the generated masks to SQLite. "
+                        "Your changes remain in the current session."
+                    )
+                    st.stop()
+
                 st.rerun()
 
         # -------------------------
@@ -1342,15 +1645,32 @@ def main():
                         max_value=255,
                         value=st.session_state.get("background_threshold", 180),
                         key="background_threshold",
+                        on_change=persist_active_project,
+                        args=(st.session_state,),
                     )
 
-                    st.checkbox("Enhance focus detail", value=True, key="enhance_focus")
-                    st.checkbox("Enhance contours", value=True, key="enhance_contour")
+                    st.checkbox(
+                        "Enhance focus detail",
+                        value=True,
+                        key="enhance_focus",
+                        on_change=persist_active_project,
+                        args=(st.session_state,),
+                    )
+
+                    st.checkbox(
+                        "Enhance contours",
+                        value=True,
+                        key="enhance_contour",
+                        on_change=persist_active_project,
+                        args=(st.session_state,),
+                    )
 
                     remove_background = st.checkbox(
                         "Remove background",
                         key="remove_background_details",
                         help="Keep only the focus objects and remove everything else from the rendered image.",
+                        on_change=persist_active_project,
+                        args=(st.session_state,),
                     )
 
                     reduce_background = st.checkbox(
@@ -1358,6 +1678,8 @@ def main():
                         key="reduce_background_details",
                         disabled=remove_background,
                         help="Soften non-focus details while keeping visual context.",
+                        on_change=persist_active_project,
+                        args=(st.session_state,),
                     )
 
                     if reduce_background and not remove_background:
@@ -1368,6 +1690,8 @@ def main():
                             value=st.session_state.get("background_reduce_strength", 0.65),
                             step=0.05,
                             key="background_reduce_strength",
+                            on_change=persist_active_project,
+                            args=(st.session_state,)
                         )
 
                         st.slider(
@@ -1376,12 +1700,16 @@ def main():
                             max_value=180,
                             value=140,
                             key="background_target_gray",
+                            on_change=persist_active_project,
+                            args=(st.session_state,)
                         )
 
                         st.checkbox(
                             "Blur background",
                             key="background_reduce_blur",
                             help="Softly blur non-focus background details.",
+                            on_change=persist_active_project,
+                            args=(st.session_state,)
                         )
 
                 render_button_label = (
@@ -1445,6 +1773,15 @@ def main():
                     st.session_state.ai_annotation_suggestions = None
                     st.session_state.approved_ai_lines = []
                     st.session_state.manual_lines = []
+
+                    # Persist the rendered illustration and its settings.
+                    if not persist_active_project(st.session_state):
+                        st.error(
+                            "Could not save the rendered illustration to SQLite. "
+                            "Your changes remain in the current session."
+                        )
+                        st.stop()
+
                     st.rerun()
 
                 st.markdown("---")
@@ -1522,6 +1859,15 @@ def main():
                     st.session_state.ai_annotation_suggestions = None
                     st.session_state.ai_notes = []
                     st.session_state.annotation_canvas_version += 1
+
+                    # Persist the cleared masks and rendering state.
+                    if not persist_active_project(st.session_state):
+                        st.error(
+                            "Could not save the cleared masks to SQLite. "
+                            "Your changes remain in the current session."
+                        )
+                        st.stop()
+
                     st.rerun()
 
             elif section == "Export":
@@ -1738,9 +2084,23 @@ def main():
 
             if project_illustrations:
 
-                navigation_columns = st.columns(
-                    [1] * len(project_illustrations) + [8]
-                )
+                if project_illustrations:
+
+                    active_navigation_illustration = get_illustration(
+                        st.session_state.helios_project,
+                        st.session_state.active_illustration_id,
+                    )
+
+                    if active_navigation_illustration is not None:
+                        st.caption(
+                            f"Active illustration: {active_navigation_illustration['name']}"
+                        )
+
+                    navigation_columns = st.columns(
+                        [1] * len(project_illustrations) + [7, 1]
+                    )
+
+                manage_navigation_col = navigation_columns[-1]
 
                 for index, illustration in enumerate(project_illustrations):
                     illustration_id = illustration["illustration_id"]
@@ -1759,7 +2119,7 @@ def main():
 
                     with navigation_columns[index % len(navigation_columns)]:
                         if st.button(
-                                f"{'● ' if is_active else ''}Image {index + 1}",
+                                f"Img{index + 1}",
                                 key=f"illustration_tile_{illustration_id}",
                                 help=illustration_name,
                                 disabled=is_active,
@@ -1768,6 +2128,277 @@ def main():
                         ):
                             st.session_state["pending_illustration_switch"] = illustration_id
                             st.rerun()
+
+            # Illustration management: rename the active illustration.
+            active_illustration = get_illustration(
+                st.session_state.helios_project,
+                st.session_state.active_illustration_id,
+            )
+
+            if active_illustration is not None:
+
+                # Compact illustration management menu.
+                with manage_navigation_col:
+                    with st.popover(
+                            "⚙",
+                            use_container_width=False,
+                    ):
+                        st.caption("Illustration actions")
+
+                        if st.button(
+                                "Rename Image",
+                                key="rename_illustration_toggle",
+                                use_container_width=True,
+                        ):
+                            st.session_state.rename_illustration_open = (
+                                not st.session_state.get(
+                                    "rename_illustration_open", False
+                                )
+                            )
+
+                        if st.button(
+                                "Duplicate Image",
+                                key="duplicate_active_illustration",
+                                use_container_width=True,
+                        ):
+                                # Save the latest edits before copying the illustration.
+                                if not persist_active_project(st.session_state):
+                                    st.error(
+                                        "Could not save the current illustration. "
+                                        "Duplication was cancelled."
+                                    )
+                                    st.stop()
+
+                                new_illustration_id = duplicate_illustration(
+                                    st.session_state.helios_project,
+                                    st.session_state.active_illustration_id,
+                                )
+
+                                if new_illustration_id is None:
+                                    st.error("Could not duplicate the illustration.")
+                                    st.stop()
+
+                                # Persist the newly created illustration.
+                                try:
+                                    save_project(st.session_state.helios_project)
+                                except Exception as exc:
+                                    # Roll back the in-memory duplicate if saving fails.
+                                    st.session_state.helios_project["illustrations"] = [
+                                        illustration
+                                        for illustration in st.session_state.helios_project["illustrations"]
+                                        if illustration["illustration_id"] != new_illustration_id
+                                    ]
+                                    st.error(
+                                        f"Could not save the duplicated illustration: {exc}"
+                                    )
+                                    st.stop()
+
+                                st.rerun()
+
+                        # Illustration management: reorder the active illustration.
+                        illustration_ids = [
+                            item["illustration_id"]
+                            for item in st.session_state.helios_project["illustrations"]
+                        ]
+
+                        active_index = illustration_ids.index(
+                            st.session_state.active_illustration_id
+                        )
+
+                        move_left_col, move_right_col = st.columns(2)
+
+                        with move_left_col:
+                            move_left_clicked = st.button(
+                                "← Move",
+                                key="move_illustration_left",
+                                disabled=active_index == 0,
+                                use_container_width=True,
+                            )
+
+                        with move_right_col:
+                            move_right_clicked = st.button(
+                                "Move →",
+                                key="move_illustration_right",
+                                disabled=active_index == len(illustration_ids) - 1,
+                                use_container_width=True,
+                            )
+
+                        if move_left_clicked or move_right_clicked:
+                            # Preserve the latest edits before changing project order.
+                            if not persist_active_project(st.session_state):
+                                st.error(
+                                    "Could not save the current illustration. "
+                                    "Reordering was cancelled."
+                                )
+                                st.stop()
+
+                            direction = -1 if move_left_clicked else 1
+
+                            if move_illustration(
+                                    st.session_state.helios_project,
+                                    st.session_state.active_illustration_id,
+                                    direction,
+                            ):
+                                try:
+                                    save_project(st.session_state.helios_project)
+                                except Exception as exc:
+                                    # Restore the original order if SQLite saving fails.
+                                    move_illustration(
+                                        st.session_state.helios_project,
+                                        st.session_state.active_illustration_id,
+                                        -direction,
+                                    )
+                                    st.error(
+                                        f"Could not save the new illustration order: {exc}"
+                                    )
+                                    st.stop()
+
+                                st.rerun()
+
+                        illustration_count = len(
+                            st.session_state.helios_project["illustrations"]
+                        )
+
+                        if st.button(
+                                "Delete Image",
+                                key="delete_illustration_toggle",
+                                disabled=illustration_count <= 1,
+                                use_container_width=True,
+                        ):
+                            if st.session_state.get("delete_illustration_open", False):
+                                st.session_state.delete_illustration_open = False
+                                st.session_state.delete_illustration_target_id = None
+                            else:
+                                st.session_state.delete_illustration_open = True
+                                st.session_state.delete_illustration_target_id = (
+                                    st.session_state.active_illustration_id
+                                )
+
+                if st.session_state.get("delete_illustration_open", False):
+                    deletion_target = get_illustration(
+                        st.session_state.helios_project,
+                        st.session_state.get("delete_illustration_target_id"),
+                    )
+
+                    if deletion_target is None:
+                        st.session_state.delete_illustration_open = False
+                        st.session_state.delete_illustration_target_id = None
+                        st.rerun()
+
+                    st.warning(
+                        f"Delete '{deletion_target['name']}'? "
+                        "This illustration and its saved editing state "
+                        "will be permanently removed from the project."
+                    )
+
+                    confirm_col, cancel_col = st.columns(2)
+
+                    with confirm_col:
+                        confirm_delete = st.button(
+                            "Yes, Delete Illustration",
+                            key="confirm_delete_illustration",
+                            type="primary",
+                            use_container_width=True,
+                        )
+
+                    with cancel_col:
+                        cancel_delete = st.button(
+                            "Cancel",
+                            key="cancel_delete_illustration",
+                            use_container_width=True,
+                        )
+
+                    if cancel_delete:
+                        st.session_state.delete_illustration_open = False
+                        st.session_state.delete_illustration_target_id = None
+                        st.rerun()
+
+                    if confirm_delete:
+                        project = st.session_state.helios_project
+                        target_id = st.session_state.get(
+                            "delete_illustration_target_id"
+                        )
+
+                        # Save current edits before modifying the project.
+                        if not persist_active_project(st.session_state):
+                            st.error(
+                                "Could not save the current project. "
+                                "Deletion was cancelled."
+                            )
+                            st.stop()
+
+                        # Recheck the target and minimum illustration count.
+                        if (
+                                get_illustration(project, target_id) is None
+                                or len(project["illustrations"]) <= 1
+                        ):
+                            st.error(
+                                "The illustration cannot be deleted."
+                            )
+                            st.stop()
+
+                        # Keep the original list for rollback if saving fails.
+                        original_illustrations = list(
+                            project["illustrations"]
+                        )
+
+                        if not remove_illustration(project, target_id):
+                            st.error(
+                                "Could not remove the illustration."
+                            )
+                            st.stop()
+
+                        try:
+                            save_project(project)
+                        except Exception as exc:
+                            project["illustrations"] = original_illustrations
+                            st.error(
+                                f"Could not save the deletion: {exc}"
+                            )
+                            st.stop()
+
+                        # Reactivate the saved project without writing the
+                        # deleted illustration's state into another one.
+                        st.session_state.delete_illustration_open = False
+                        st.session_state.delete_illustration_target_id = None
+                        st.session_state.rename_illustration_open = False
+                        st.session_state.pending_illustration_switch = None
+
+                        st.session_state.pending_loaded_project = project
+                        st.session_state.pending_project_activation = True
+
+                        st.rerun()
+
+                if st.session_state.get("rename_illustration_open", False):
+                    with st.form("rename_illustration_form"):
+                        new_name = st.text_input(
+                            "Illustration name",
+                            value=active_illustration["name"],
+                        )
+
+                        submitted = st.form_submit_button("Save Name")
+
+                    if submitted:
+                        new_name = new_name.strip()
+
+                        if not new_name:
+                            st.error("Illustration name cannot be empty.")
+                        else:
+                            previous_name = active_illustration["name"]
+
+                            if rename_illustration(
+                                    st.session_state.helios_project,
+                                    st.session_state.active_illustration_id,
+                                    new_name,
+                            ):
+                                if persist_active_project(st.session_state):
+                                    st.session_state.rename_illustration_open = False
+                                    st.rerun()
+                                else:
+                                    active_illustration["name"] = previous_name
+                                    st.error(
+                                        "Could not save the illustration name."
+                                    )
 
             editor_image_src = pil_image_to_data_url(full_result.convert("RGB"))
 
@@ -1837,7 +2468,49 @@ def main():
                         == st.session_state.get("editor_project_key")
                 )
 
-                st.session_state["react_editor_state"] = react_editor_state
+
+                previous_editor_state = st.session_state.get(
+                    "react_editor_state"
+                )
+
+                temporary_editor_fields = {
+                    "exportedImageDataUrl",
+                    "exportRequestId",
+                }
+
+                current_editable_state = {
+                    key: value
+                    for key, value in react_editor_state.items()
+                    if key not in temporary_editor_fields
+                }
+
+                previous_editable_state = {
+                    key: value
+                    for key, value in (
+                        previous_editor_state
+                        if isinstance(previous_editor_state, dict)
+                        else {}
+                    ).items()
+                    if key not in temporary_editor_fields
+                }
+
+                editor_state_changed = (
+                        previous_editable_state != current_editable_state
+                )
+
+                st.session_state["react_editor_state"] = current_editable_state
+
+
+                if editor_state_changed:
+                    if persist_active_project(st.session_state):
+                        st.session_state["project_save_status"] = "saved"
+                    else:
+                        st.session_state["project_save_status"] = "failed"
+                        st.error(
+                            "Helios could not automatically save your "
+                            "latest annotation changes."
+                        )
+
 
                 if is_export_response:
                     header, encoded = exported_data_url.split(",", 1)
@@ -1856,6 +2529,14 @@ def main():
                     st.session_state.export_ready = True
                     st.session_state.last_consumed_export_request_id = returned_export_id
                     st.session_state.export_request_id = None
+
+                    # Persist the final image produced by the React editor.
+                    if not persist_active_project(st.session_state):
+                        st.error(
+                            "Could not save the exported illustration to SQLite. "
+                            "The exported image remains available in this session."
+                        )
+                        st.stop()
 
                     if st.session_state.get("batch_export_active"):
                         st.session_state.batch_export_images.append(

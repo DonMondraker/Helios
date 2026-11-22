@@ -1,0 +1,9 @@
+# Helios persistent project database
+/data/helios_projects.db
+/data/helios_projects.db-wal
+/data/helios_projects.db-shm
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/

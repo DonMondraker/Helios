@@ -868,7 +868,7 @@ function App({
         height: image.height,
       });
 
-      setScale(containerWidth / image.width);
+      setScale((containerWidth / image.width) * 0.925);
     };
 
     updateScale();
