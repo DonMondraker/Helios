@@ -100,22 +100,9 @@ type HeliosEditorProps = {
   debug?: boolean;
   initialState?: Partial<HeliosEditorState>;
   focusObjectsFromStreamlit?: FocusObject[];
-  aiSuggestions?: AiAnnotationSuggestions | null;
   pendingInsetAsset?: PendingInsetAsset | null;
   exportRequestId?: string | null;
   projectKey?: string | null;
-};
-
-type AiAnnotationSuggestions = {
-  movement_lines?: {
-    start: [number, number];
-    end: [number, number];
-  }[];
-  callouts?: {
-    label: string;
-    circle: [number, number];
-    end: [number, number];
-  }[];
 };
 
 type PendingInsetAsset = {
@@ -481,7 +468,6 @@ function App({
   debug = true,
   initialState,
   focusObjectsFromStreamlit,
-  aiSuggestions,
   pendingInsetAsset,
   exportRequestId,
   projectKey,
@@ -561,18 +547,6 @@ function App({
   const getNextLineName = () => `Line ${lines.length + 1}`;
   const getNextCalloutName = () => `Callout ${callouts.length + 1}`;
   const getNextInsetName = () => `Detail View ${insets.length + 1}`;
-
-  const makeEditorLineFromAi = (
-    line: { start: [number, number]; end: [number, number] },
-    index: number
-  ): EditorLine => ({
-    id: `line_ai_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    name: `Line ${lines.length + index + 1}`,
-    x1: line.start[0],
-    y1: line.start[1],
-    x2: line.end[0],
-    y2: line.end[1],
-  });
 
   const deleteSelectedObject = () => {
     if (!selectedObjectId) return;
@@ -751,17 +725,6 @@ function App({
     focusObjects,
     selectedObjectId,
   });
-
-  const approveAiSuggestions = () => {
-    if (!aiSuggestions) return;
-
-    const approvedLines =
-      aiSuggestions.movement_lines?.map((line, index) =>
-        makeEditorLineFromAi(line, index)
-      ) ?? [];
-
-    setLines((previous) => [...previous, ...approvedLines]);
-  };
 
   useEffect(() => {
     if (!exportRequestId) return;
@@ -1064,26 +1027,6 @@ function App({
           </div>
         </div>
 
-        {aiSuggestions &&
-            ((aiSuggestions.movement_lines?.length ?? 0) > 0 ||
-              (aiSuggestions.callouts?.length ?? 0) > 0) && (
-              <div>
-                <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
-                  AI
-                </div>
-
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button
-                    type="button"
-                    onClick={approveAiSuggestions}
-                    className="rounded-lg border px-3 py-2 text-sm font-medium"
-                  >
-                    Approve AI Suggestions
-                  </button>
-                </div>
-              </div>
-            )}
-
         <div>
           <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
             Views
@@ -1288,87 +1231,6 @@ function App({
                     setSelectedObjectId={setSelectedObjectId}
                     setOverlayImages={setOverlayImages}
                   />
-                ))}
-
-                {aiSuggestions?.movement_lines?.map((line, index) => (
-                  <React.Fragment key={`ai-line-${index}`}>
-                    <Line
-                      points={[line.start[0], line.start[1], line.end[0], line.end[1]]}
-                      stroke={HALO_COLOR}
-                      strokeWidth={14}
-                      lineCap="round"
-                      lineJoin="round"
-                      opacity={0.7}
-                      listening={false}
-                    />
-                    <Line
-                      points={[line.start[0], line.start[1], line.end[0], line.end[1]]}
-                      stroke="#777"
-                      strokeWidth={5}
-                      dash={[s(8), s(6)]}
-                      lineCap="round"
-                      lineJoin="round"
-                      opacity={0.9}
-                      listening={false}
-                    />
-                  </React.Fragment>
-                ))}
-
-                {aiSuggestions?.callouts?.map((callout, index) => (
-                  <React.Fragment key={`ai-callout-${index}`}>
-                    <Line
-                      points={[
-                        callout.circle[0],
-                        callout.circle[1],
-                        callout.end[0],
-                        callout.end[1],
-                      ]}
-                      stroke={HALO_COLOR}
-                      strokeWidth={11}
-                      lineCap="round"
-                      lineJoin="round"
-                      opacity={0.7}
-                      listening={false}
-                    />
-
-                    <Line
-                      points={[
-                        callout.circle[0],
-                        callout.circle[1],
-                        callout.end[0],
-                        callout.end[1],
-                      ]}
-                      stroke="#777"
-                      strokeWidth={5}
-                      dash={[s(8), s(6)]}
-                      lineCap="round"
-                      lineJoin="round"
-                      opacity={0.9}
-                      listening={false}
-                    />
-
-                    <Circle
-                      x={callout.circle[0]}
-                      y={callout.circle[1]}
-                      radius={s(22)}
-                      fill="white"
-                      stroke="#777"
-                      strokeWidth={5}
-                      dash={[6, 4]}
-                      opacity={0.9}
-                      listening={false}
-                    />
-
-                    <Text
-                      x={callout.circle[0] - 5}
-                      y={callout.circle[1] - 8}
-                      text={callout.label}
-                      fontSize={18}
-                      fontStyle="bold"
-                      fill="#777"
-                      listening={false}
-                    />
-                  </React.Fragment>
                 ))}
 
                 {focusObjects.map((focusObject) => {
@@ -2229,7 +2091,6 @@ function StreamlitAppWrapper() {
       debug={args.debug ?? false}
       initialState={args.initialState}
       focusObjectsFromStreamlit={args.focusObjectsFromStreamlit}
-      aiSuggestions={args.aiSuggestions}
       pendingInsetAsset={args.pendingInsetAsset}
       exportRequestId={args.exportRequestId}
       projectKey={args.projectKey}

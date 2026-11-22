@@ -27,13 +27,11 @@ from rendering.editor_annotations import (
     get_mask_bbox,
 )
 from rendering.insets import draw_insets_on_image
-from rendering.strategy_to_annotations import strategy_to_annotations
 from exporting.export_config import EXPORT_PRESETS, EXPORT_BUNDLES
 from exporting.image_export import draw_focus_halos, draw_react_inset_images
 from exporting.exporter import (
     export_illustrations_zip,
 )
-from ai.suggestion_engine import request_ai_suggestions
 from project_state.project_model import (
     create_empty_project,
     add_illustration,
@@ -1223,10 +1221,6 @@ def main():
         "uploaded_image_filename": None,
         "last_uploaded_image_hash": None,
         "last_uploaded_batch_hash": None,
-        "ai_notes": [],
-        "ai_strategy": None,
-        "ai_annotation_suggestions": None,
-        "approved_ai_lines": [],
         "ui_mode": "Production",
         "annotation_tool": "Line",
         "annotation_canvas_version": 0,
@@ -1473,10 +1467,6 @@ def main():
         st.session_state.callouts = []
         st.session_state.annotation_canvas_version = 0
         st.session_state.mask_step_completed = False
-        st.session_state.ai_notes = []
-        st.session_state.ai_strategy = None
-        st.session_state.ai_annotation_suggestions = None
-        st.session_state.approved_ai_lines = []
         st.session_state.manual_lines = []
 
         # React editor state
@@ -1622,10 +1612,6 @@ def main():
                 st.session_state.callouts = []
                 st.session_state.manual_lines = []
                 st.session_state.annotation_canvas_version += 1
-                st.session_state.ai_notes = []
-                st.session_state.ai_strategy = None
-                st.session_state.ai_annotation_suggestions = None
-                st.session_state.approved_ai_lines = []
 
                 st.session_state.sidebar_section = "Render"
 
@@ -1789,10 +1775,6 @@ def main():
 
                     st.session_state.result_image = result
                     st.session_state.final_result_image = result
-                    st.session_state.ai_notes = []
-                    st.session_state.ai_strategy = None
-                    st.session_state.ai_annotation_suggestions = None
-                    st.session_state.approved_ai_lines = []
                     st.session_state.manual_lines = []
 
                     # Persist the rendered illustration and its settings.
@@ -1875,10 +1857,6 @@ def main():
                     st.session_state.final_result_image = None
                     st.session_state.callouts = []
                     st.session_state.manual_lines = []
-                    st.session_state.approved_ai_lines = []
-                    st.session_state.ai_strategy = None
-                    st.session_state.ai_annotation_suggestions = None
-                    st.session_state.ai_notes = []
                     st.session_state.annotation_canvas_version += 1
 
                     # Persist the cleared masks and rendering state.
@@ -2442,7 +2420,6 @@ def main():
             react_editor_state = helios_editor(
                 image_src=editor_image_src,
                 focus_objects=focus_objects_for_editor,
-                ai_suggestions=st.session_state.get("ai_annotation_suggestions"),
                 initial_state=st.session_state.get("react_editor_state"),
                 debug=st.session_state.get("ui_mode", "Production") == "Debug",
                 pending_inset_asset=pending_inset_asset_to_react(st.session_state),

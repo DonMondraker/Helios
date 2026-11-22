@@ -162,64 +162,6 @@ def get_mask_bbox(mask_image: Image.Image):
     )
 
 
-def draw_suggested_callouts(
-        image: Image.Image,
-        callouts: list[dict],
-        radius: int = 18,
-        line_thickness: int = 2,
-        font_scale: float = 0.65,
-        text_thickness: int = 2,
-):
-    return draw_callouts(
-        image=image,
-        callouts=[
-            {
-                "label": c["label"],
-                "circle_x": c["circle"][0],
-                "circle_y": c["circle"][1],
-                "end_x": c["end"][0],
-                "end_y": c["end"][1],
-            }
-            for c in callouts
-        ],
-        radius=radius,
-        line_thickness=line_thickness,
-        font_scale=font_scale,
-        text_thickness=text_thickness,
-    )
-
-
-def draw_ai_suggested_lines(
-        image: Image.Image,
-        movement_lines: list[dict],
-        color: tuple[int, int, int] = (0, 0, 0),
-        stroke_width: int = 2,
-        halo: bool = True,
-        halo_color: tuple[int, int, int] = (255, 255, 255),
-        halo_extra_thickness: int = 3,
-):
-    converted = []
-    for line in movement_lines:
-        converted.append(
-            {
-                "x1": line["start"][0],
-                "y1": line["start"][1],
-                "x2": line["end"][0],
-                "y2": line["end"][1],
-                "stroke_width": stroke_width,
-            }
-        )
-
-    return draw_lines_on_image(
-        image,
-        converted,
-        color=color,
-        halo=halo,
-        halo_color=halo_color,
-        halo_extra_thickness=halo_extra_thickness,
-    )
-
-
 def draw_temporary_callout_points(
         image: Image.Image,
         points: list[tuple[int, int]],

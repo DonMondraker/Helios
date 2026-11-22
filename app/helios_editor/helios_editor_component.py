@@ -24,7 +24,6 @@ else:
 def helios_editor(
         image_src=None,
         focus_objects=None,
-        ai_suggestions=None,
         initial_state=None,
         pending_inset_asset=None,
         export_request_id=None,
@@ -35,7 +34,6 @@ def helios_editor(
     component_value = _COMPONENT(
         imageSrc=image_src,
         focusObjectsFromStreamlit=focus_objects,
-        aiSuggestions=ai_suggestions,
         initialState=initial_state,
         debug=debug,
         default={},
