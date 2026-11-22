@@ -1011,139 +1011,140 @@ def combine_masks(*masks: Image.Image | None) -> Image.Image | None:
 def render_project_startup():
     """Display the Helios project startup screen."""
 
-    st.title("Welcome to Helios")
-    st.caption("Your persistent technical illustration workspace")
+    # st.title("Welcome to Helios")
+    # st.caption("Your persistent technical illustration workspace")
+
+    new_project_column, import_project_column = st.columns(2)
+
+    with new_project_column:
+        st.subheader("New Project")
+
+        new_project_image = st.file_uploader(
+            "Upload illustrations",
+            type=["png", "jpg", "jpeg"],
+            key="new_project_first_illustration",
+            help="Upload an illustration to create a new Helios project.",
+        )
 
 
-
-    st.subheader("New Project")
-
-    new_project_image = st.file_uploader(
-        "Upload your first illustration",
-        type=["png", "jpg", "jpeg"],
-        key="new_project_first_illustration",
-        help="Upload an illustration to create a new Helios project.",
-    )
-
-
-    if new_project_image is not None:
-        try:
-            image_bytes = new_project_image.getvalue()
-            source_image = Image.open(
-                BytesIO(image_bytes)
-            ).convert("RGB")
-            source_image.load()
-        except Exception as exc:
-            st.error(f"Could not read illustration: {exc}")
-        else:
-            new_project = create_empty_project()
-
-            illustration_state = {
-                "source": {
-                    "filename": new_project_image.name,
-                    "image_b64": encode_image(source_image),
-                },
-                "masks": {
-                    "focus_mask_b64": None,
-                    "context_mask_b64": None,
-                },
-                "annotations": {
-                    "react_editor_state": None,
-                },
-            }
-
-            add_illustration(
-                new_project,
-                new_project_image.name,
-                illustration_state,
-            )
-
+        if new_project_image is not None:
             try:
-                save_project(new_project)
+                image_bytes = new_project_image.getvalue()
+                source_image = Image.open(
+                    BytesIO(image_bytes)
+                ).convert("RGB")
+                source_image.load()
             except Exception as exc:
-                st.error(f"Could not save new project: {exc}")
+                st.error(f"Could not read illustration: {exc}")
             else:
-                st.session_state.pending_loaded_project = new_project
-                st.session_state.pending_project_activation = True
-                st.session_state.workspace_open = True
-                st.rerun()
+                new_project = create_empty_project()
+
+                illustration_state = {
+                    "source": {
+                        "filename": new_project_image.name,
+                        "image_b64": encode_image(source_image),
+                    },
+                    "masks": {
+                        "focus_mask_b64": None,
+                        "context_mask_b64": None,
+                    },
+                    "annotations": {
+                        "react_editor_state": None,
+                    },
+                }
+
+                add_illustration(
+                    new_project,
+                    new_project_image.name,
+                    illustration_state,
+                )
+
+                try:
+                    save_project(new_project)
+                except Exception as exc:
+                    st.error(f"Could not save new project: {exc}")
+                else:
+                    st.session_state.pending_loaded_project = new_project
+                    st.session_state.pending_project_activation = True
+                    st.session_state.workspace_open = True
+                    st.rerun()
 
 
 
+    with import_project_column:
+        st.subheader("Import Helios Project")
 
-    st.subheader("Import Helios Project")
+        imported_project_file = st.file_uploader(
+            "Upload .helios project file",
+            type=["helios"],
+            key="startup_import_helios",
+            help="Import an editable Helios project into your workspace.",
+        )
 
-    imported_project_file = st.file_uploader(
-        "Select a .helios project file",
-        type=["helios"],
-        key="startup_import_helios",
-        help="Import an editable Helios project into your workspace.",
-    )
-
-    if imported_project_file is not None:
-        try:
-            imported_project = load_project_file(
-                imported_project_file.getvalue()
-            )
-        except ValueError as exc:
-            st.error(f"Could not import Helios project: {exc}")
-
-
-        else:
+        if imported_project_file is not None:
             try:
-                existing_project = load_project(
-                    imported_project["project_id"]
+                imported_project = load_project_file(
+                    imported_project_file.getvalue()
                 )
-            except Exception as exc:
-                st.error(
-                    f"Could not check the project database: {exc}"
-                )
-                st.session_state.pop(
-                    "startup_import_candidate", None
-                )
-            else:
-                st.session_state["startup_import_candidate"] = (
-                    imported_project
-                )
+            except ValueError as exc:
+                st.error(f"Could not import Helios project: {exc}")
 
-                if existing_project is not None:
-                    st.warning(
-                        "A project with this ID already exists in Helios. "
-                        "Importing will create a separate copy, "
-                        "leaving the existing project unchanged."
+
+            else:
+                try:
+                    existing_project = load_project(
+                        imported_project["project_id"]
+                    )
+                except Exception as exc:
+                    st.error(
+                        f"Could not check the project database: {exc}"
+                    )
+                    st.session_state.pop(
+                        "startup_import_candidate", None
                     )
                 else:
-                    st.success(
-                        f"Project validated: "
-                        f"{len(imported_project['illustrations'])} illustrations."
+                    st.session_state["startup_import_candidate"] = (
+                        imported_project
                     )
 
+                    if existing_project is not None:
+                        st.warning(
+                            "A project with this ID already exists in Helios. "
+                            "Importing will create a separate copy, "
+                            "leaving the existing project unchanged."
+                        )
+                    else:
+                        st.success(
+                            f"Project validated: "
+                            f"{len(imported_project['illustrations'])} illustrations."
+                        )
 
-    import_candidate = st.session_state.get(
-        "startup_import_candidate"
-    )
 
-    if import_candidate is not None:
-        if st.button(
-                "Import Project",
-                key="confirm_startup_import",
-                use_container_width=True,
-        ):
-            imported_copy = deepcopy(import_candidate)
-            imported_copy["project_id"] = str(uuid4())
+        import_candidate = st.session_state.get(
+            "startup_import_candidate"
+        )
 
-            try:
-                save_project(imported_copy)
-            except Exception as exc:
-                st.error(f"Could not save imported project: {exc}")
-            else:
-                st.session_state.pop(
-                    "startup_import_candidate", None
-                )
-                st.session_state.pending_loaded_project = imported_copy
-                st.session_state.pending_project_activation = True
-                st.session_state.workspace_open = True
-                st.rerun()
+        if import_candidate is not None:
+            if st.button(
+                    "Import Project",
+                    key="confirm_startup_import",
+                    use_container_width=True,
+            ):
+                imported_copy = deepcopy(import_candidate)
+                imported_copy["project_id"] = str(uuid4())
+
+                try:
+                    save_project(imported_copy)
+                except Exception as exc:
+                    st.error(f"Could not save imported project: {exc}")
+                else:
+                    st.session_state.pop(
+                        "startup_import_candidate", None
+                    )
+                    st.session_state.pending_loaded_project = imported_copy
+                    st.session_state.pending_project_activation = True
+                    st.session_state.workspace_open = True
+                    st.rerun()
 
     st.subheader("Recent Projects")
 
@@ -1494,21 +1495,21 @@ def main():
 
     with st.sidebar:
 
-        sidebar_logo_base64 = get_base64_image(
-            "app/ui/assets/helios_logo_small.png"
-        )
-
-        st.markdown(
-            f"""
-                <div style="display: flex; justify-content: center; padding: 4px 0 16px 0;">
-                    <img
-                        src="data:image/png;base64,{sidebar_logo_base64}"
-                        style="width: 150px; max-width: 100%; height: auto;"
-                    />
-                </div>
-                """,
-            unsafe_allow_html=True,
-        )
+        # sidebar_logo_base64 = get_base64_image(
+        #     "app/ui/assets/helios_logo_small.png"
+        # )
+        #
+        # st.markdown(
+        #     f"""
+        #         <div style="display: flex; justify-content: center; padding: 4px 0 16px 0;">
+        #             <img
+        #                 src="data:image/png;base64,{sidebar_logo_base64}"
+        #                 style="width: 150px; max-width: 100%; height: auto;"
+        #             />
+        #         </div>
+        #         """,
+        #     unsafe_allow_html=True,
+        # )
 
         if st.button(
                 "Main Menu",
@@ -1645,7 +1646,7 @@ def main():
         else:
 
             # This part is new
-            st.subheader("Menu")
+            # st.subheader("Menu")
             st.radio(
                 " ",
                 options=["Render", "Masks", "Export", "Settings"],
@@ -1656,7 +1657,7 @@ def main():
             section = st.session_state.sidebar_section
 
             if section == "Render":
-                st.subheader("Render Illustration")
+                # st.subheader("Render Illustration")
 
                 with st.expander("Advanced render options", expanded=False):
                     st.slider(
@@ -1805,7 +1806,7 @@ def main():
                     st.rerun()
 
                 st.markdown("---")
-                st.subheader("Inset / Detail View")
+                # st.subheader("Inset / Detail View")
 
                 inset_upload = st.file_uploader(
                     "Upload inset image",

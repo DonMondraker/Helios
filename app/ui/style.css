@@ -295,3 +295,17 @@ iframe {
 [data-testid="stMainBlockContainer"] {
     padding-top: 0.5rem !important;
 }
+
+/* Make the sidebar navigation radio widget full width */
+.st-key-sidebar_section {
+    width: 100% !important;
+}
+
+.st-key-sidebar_section [role="radiogroup"] {
+    width: 100% !important;
+}
+
+.st-key-sidebar_section [data-baseweb="radio"] {
+    width: 100% !important;
+    box-sizing: border-box;
+}
