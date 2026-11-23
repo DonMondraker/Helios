@@ -134,8 +134,8 @@ def _create_inset_asset_from_upload(uploaded_file, session_state) -> tuple[str, 
         focus_mask=inset_focus_mask,
         context_mask=inset_context_mask,
         background_threshold=session_state.get("background_threshold", 180),
-        enhance_focus=session_state.get("enhance_focus", True),
-        enhance_contour=session_state.get("enhance_contour", True),
+        enhance_focus=session_state.get("enhance_focus", False),
+        enhance_contour=session_state.get("enhance_contour", False),
     )
 
     asset_id = f"inset_asset_{hashlib.sha1((uploaded_file.name + str(inset_rendered.size)).encode('utf-8')).hexdigest()[:12]}"
@@ -534,10 +534,10 @@ def save_active_illustration_state(session_state) -> bool:
                 "background_threshold", 180
             ),
             "enhance_focus": session_state.get(
-                "enhance_focus", True
+                "enhance_focus", False
             ),
             "enhance_contour": session_state.get(
-                "enhance_contour", True
+                "enhance_contour", False
             ),
             "remove_background_details": session_state.get(
                 "remove_background_details", False
@@ -1237,8 +1237,8 @@ def main():
         "min_saturation": 45,
         "min_value": 20,
         "background_threshold": 180,
-        "enhance_focus": True,
-        "enhance_contour": True,
+        "enhance_focus": False,
+        "enhance_contour": False,
         "sidebar_section": "Render",
         "export_request_id": None,
         "last_consumed_export_request_id": None,
@@ -1646,28 +1646,28 @@ def main():
                 # st.subheader("Render Illustration")
 
                 with st.expander("Advanced render options", expanded=False):
-                    st.slider(
-                        "Background threshold",
-                        min_value=150,
-                        max_value=255,
-                        value=st.session_state.get("background_threshold", 180),
-                        key="background_threshold",
-                        on_change=persist_active_project,
-                        args=(st.session_state,),
-                    )
+                    # st.slider(
+                    #     "Background threshold",
+                    #     min_value=150,
+                    #     max_value=255,
+                    #     value=st.session_state.get("background_threshold", 180),
+                    #     key="background_threshold",
+                    #     on_change=persist_active_project,
+                    #     args=(st.session_state,),
+                    # )
 
                     st.checkbox(
-                        "Enhance focus detail",
-                        value=True,
+                        "Enhance Focus detail",
                         key="enhance_focus",
+                        help="Enhance details on the focus part",
                         on_change=persist_active_project,
                         args=(st.session_state,),
                     )
 
                     st.checkbox(
                         "Enhance contours",
-                        value=True,
                         key="enhance_contour",
+                        help="Enhance overall contours",
                         on_change=persist_active_project,
                         args=(st.session_state,),
                     )
@@ -1848,7 +1848,7 @@ def main():
                             st.rerun()
 
             elif section == "Masks":
-                st.subheader("Masks")
+                # st.subheader("Masks")
 
                 if st.button("Regenerate Masks", use_container_width=True):
                     st.session_state.focus_mask = None
@@ -1870,7 +1870,7 @@ def main():
                     st.rerun()
 
             elif section == "Export":
-                st.subheader("Export")
+                # st.subheader("Export")
 
 
                 st.markdown("#### Native Project")
@@ -2026,7 +2026,7 @@ def main():
                     st.info("Add an illustration to enable export.")
 
             elif section == "Settings":
-                st.subheader("Settings")
+                # st.subheader("Settings")
 
                 if st.session_state.get("ui_mode", "Production") == "Debug":
                     with st.expander("Debug Tools"):
