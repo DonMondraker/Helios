@@ -133,6 +133,28 @@ def list_projects(
         for row in rows
     ]
 
+def rename_project(
+        project_id: str,
+        new_name: str,
+        database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> bool:
+    """Rename an existing Helios project."""
+
+    new_name = new_name.strip()
+
+    if not new_name:
+        return False
+
+    project = load_project(project_id, database_path)
+
+    if project is None:
+        return False
+
+    project["project_name"] = new_name
+
+    save_project(project, database_path)
+
+    return True
 
 def delete_project(
         project_id: str,

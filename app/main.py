@@ -45,6 +45,8 @@ from project_state.project_repository import (
     save_project,
     list_projects,
     load_project,
+    rename_project,
+    delete_project,
 )
 from project_state.project_file import (
     save_project_file,
@@ -1020,9 +1022,14 @@ def render_project_startup():
                 f"Last updated: {project['updated_at']}"
             )
 
-            if st.button(
+            open_col, _, rename_col, delete_col = st.columns(
+                [1.2, 10, 1, 1]
+            )
+
+            if open_col.button(
                     "Open Project",
                     key=f"open_project_{project['project_id']}",
+                    use_container_width=True,
             ):
                 try:
                     loaded_project = load_project(
@@ -1046,6 +1053,108 @@ def render_project_startup():
                         f"Could not open project: {exc}"
                     )
 
+            project_id = project["project_id"]
+            rename_key = f"rename_active_{project_id}"
+
+            if rename_col.button(
+                    "Rename",
+                    key=f"rename_project_{project_id}",
+                    use_container_width=True,
+            ):
+                st.session_state[rename_key] = True
+
+            if st.session_state.get(rename_key, False):
+                new_name = st.text_input(
+                    "Project name",
+                    value=project["project_name"],
+                    key=f"new_project_name_{project_id}",
+                )
+
+                save_column, cancel_column = st.columns(2)
+
+                with save_column:
+                    if st.button(
+                            "Save",
+                            key=f"save_project_name_{project_id}",
+                            use_container_width=True,
+                    ):
+                        if not new_name.strip():
+                            st.warning("Project name cannot be empty.")
+                        else:
+                            try:
+                                renamed = rename_project(
+                                    project_id,
+                                    new_name,
+                                )
+                            except Exception as exc:
+                                st.error(
+                                    f"Could not rename project: {exc}"
+                                )
+                            else:
+                                if renamed:
+                                    st.session_state[rename_key] = False
+                                    st.rerun()
+                                else:
+                                    st.error("Could not rename project.")
+
+                with cancel_column:
+                    if st.button(
+                            "Cancel",
+                            key=f"cancel_rename_{project_id}",
+                            use_container_width=True,
+                    ):
+                        st.session_state[rename_key] = False
+                        st.rerun()
+
+            delete_key = f"delete_active_{project_id}"
+
+            if delete_col.button(
+                    "Delete",
+                    key=f"delete_project_{project_id}",
+                    use_container_width=True,
+            ):
+                st.session_state[delete_key] = True
+                st.session_state[rename_key] = False
+                st.rerun()
+
+            if st.session_state.get(delete_key, False):
+                st.warning(
+                    f"Permanently delete '{project['project_name']}' "
+                    "and all its illustrations? "
+                    "This action cannot be undone."
+                )
+
+                delete_column, cancel_column = st.columns(2)
+
+                with delete_column:
+                    if st.button(
+                            "Delete Project",
+                            key=f"confirm_delete_{project_id}",
+                            type="primary",
+                            use_container_width=True,
+                    ):
+                        try:
+                            deleted = delete_project(project_id)
+                        except Exception as exc:
+                            st.error(
+                                f"Could not delete project: {exc}"
+                            )
+                        else:
+                            if deleted:
+                                st.session_state.pop(delete_key, None)
+                                st.session_state.pop(rename_key, None)
+                                st.rerun()
+                            else:
+                                st.error("Could not find project.")
+
+                with cancel_column:
+                    if st.button(
+                            "Cancel",
+                            key=f"cancel_delete_{project_id}",
+                            use_container_width=True,
+                    ):
+                        st.session_state[delete_key] = False
+                        st.rerun()
 
 def main():
 
