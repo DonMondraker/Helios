@@ -15,7 +15,16 @@ import useImage from "use-image";
 
 import sampleImage from "./assets/battD.jpg";
 
-type Tool = "select" | "draw" | "arrow" | "callout" | "detail" | "inset" | "overlay" | "focus";
+type Tool =
+  | "select"
+  | "draw"
+  | "arrow"
+  | "callout"
+  | "detail"
+  | "inset"
+  | "overlay"
+  | "focus"
+  | "halo";
 
 type EditorLine = {
   id: string;
@@ -77,6 +86,10 @@ type FocusObject = {
   name: string;
   polygon: { x: number; y: number }[];
   haloEnabled: boolean;
+  haloPaths?: {
+    points: { x: number; y: number }[];
+    closed: boolean;
+  }[];
 };
 
 type HeliosEditorState = {
@@ -414,6 +427,7 @@ function polygonToPoints(polygon: { x: number; y: number }[]): number[] {
   return polygon.flatMap((point) => [point.x, point.y]);
 }
 
+/*
 function getPolygonBounds(polygon: { x: number; y: number }[]) {
   const xs = polygon.map((point) => point.x);
   const ys = polygon.map((point) => point.y);
@@ -430,6 +444,7 @@ function getPolygonBounds(polygon: { x: number; y: number }[]) {
     height: maxY - minY,
   };
 }
+*/
 
 function ToolButton({
   active = false,
@@ -508,6 +523,16 @@ function App({
 
   const [insetImages, setInsetImages] = useState<EditorInsetImage[]>([]);
 
+  const [haloDraft, setHaloDraft] = useState<
+    { x: number; y: number }[] | null
+  >(null);
+
+  useEffect(() => {
+    if (tool !== "halo") {
+      setHaloDraft(null);
+    }
+  }, [tool]);
+
   const [focusObjects, setFocusObjects] = useState<FocusObject[]>([
     {
       id: "focus_1",
@@ -540,9 +565,11 @@ function App({
   const selectedCallout = callouts.find((c) => c.id === selectedObjectId);
   const selectedInset = insets.find((i) => i.id === selectedObjectId);
 
+  /*
   const selectedFocusObject = focusObjects.find(
     (obj) => obj.id === selectedObjectId
   );
+  */
 
   const getNextLineName = () => `Line ${lines.length + 1}`;
   const getNextCalloutName = () => `Callout ${callouts.length + 1}`;
@@ -679,6 +706,7 @@ function App({
     event.target.value = "";
   };
 
+  /*
   const createDetailViewFromFocusObject = (focusObject: FocusObject) => {
         const bounds = getPolygonBounds(focusObject.polygon);
         const padding = 24;
@@ -714,6 +742,7 @@ function App({
         setSelectedObjectId(newDetailView.id);
         setTool("select");
       };
+  */
 
   const getEditorState = (): HeliosEditorState => ({
     version: 1,
@@ -915,6 +944,7 @@ function App({
         return {
           ...incoming,
           haloEnabled: existing?.haloEnabled ?? incoming.haloEnabled ?? false,
+          haloPaths: existing?.haloPaths ?? incoming.haloPaths,
         };
       })
     );
@@ -934,6 +964,42 @@ function App({
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       if (event.key === "Shift") setShiftDown(true);
+
+      if (tool === "halo" && haloDraft !== null) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setHaloDraft(null);
+          return;
+        }
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+
+          if (haloDraft.length < 2) return;
+
+          setFocusObjects((current) =>
+            current.map((obj) =>
+              obj.id !== selectedObjectId
+                ? obj
+                : {
+                    ...obj,
+                    haloPaths: [
+                      ...(obj.haloPaths ?? []),
+                      {
+                        points: haloDraft.map((point) => ({ ...point })),
+                        closed: false,
+                      },
+                    ],
+                  }
+            )
+          );
+
+          setHaloDraft(null);
+          return;
+        }
+
+        return;
+      }
 
       if (event.key === "Delete" || event.key === "Backspace") {
         deleteSelectedObject();
@@ -963,7 +1029,7 @@ function App({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedObjectId, lines, callouts, insets]);
+  }, [selectedObjectId, lines, callouts, insets, tool, haloDraft]);
 
   return (
     <div
@@ -1097,6 +1163,16 @@ function App({
 
                 if (!stage || !pointer) return;
 
+                if (tool === "halo" && haloDraft !== null) {
+                  setHaloDraft((current) =>
+                    current === null
+                      ? null
+                      : [...current, { x: pointer.x, y: pointer.y }]
+                  );
+
+                  return;
+                }
+
                 const clickedOnCanvas = true;
 
                 if (tool === "callout" && clickedOnCanvas) {
@@ -1183,7 +1259,9 @@ function App({
                   return;
                 }
 
-                setSelectedObjectId(null);
+                if (tool !== "halo") {
+                  setSelectedObjectId(null);
+                }
               }}
               onMouseMove={(e) => {
                 if (!isDrawing) return;
@@ -1233,43 +1311,258 @@ function App({
                   />
                 ))}
 
+                {tool === "halo" && haloDraft !== null && (
+                  <>
+                    <Line
+                      points={polygonToPoints(haloDraft)}
+                      closed={false}
+                      stroke={HALO_COLOR}
+                      strokeWidth={s(4)}
+                      lineJoin="round"
+                      lineCap="round"
+                      listening={false}
+                    />
+
+                    {haloDraft.map((point, index) => (
+                      <Circle
+                        key={`halo-draft-${index}`}
+                        x={point.x}
+                        y={point.y}
+                        radius={s(5)}
+                        fill="#111111"
+                        stroke="#ffffff"
+                        strokeWidth={s(1)}
+                        listening={false}
+                      />
+                    ))}
+                  </>
+                )}
+
                 {focusObjects.map((focusObject) => {
                   const isSelected = selectedObjectId === focusObject.id;
                   const points = polygonToPoints(focusObject.polygon);
                   const showSelectableOutline = tool === "focus" || isSelected;
+                  const haloPaths = focusObject.haloPaths ?? [
+                    {
+                      points: focusObject.polygon,
+                      closed: true,
+                    },
+                  ];
 
                   return (
                     <React.Fragment key={focusObject.id}>
-                      {focusObject.haloEnabled && (
-                        <>
-                          <Line
-                            points={points}
-                            closed
-                            stroke={HALO_COLOR}
-                            strokeWidth={s(4)}
-                            lineJoin="round"
-                            lineCap="round"
-                            opacity={0.95}
-                            listening={false}
-                          />
-                          <Line
-                            points={points}
-                            closed
-                            stroke={HALO_COLOR}
-                            strokeWidth={s(4)}
-                            lineJoin="round"
-                            lineCap="round"
-                            opacity={0.25}
-                            shadowColor={HALO_COLOR}
-                            shadowBlur={s(4)}
-                            shadowOffsetX={0}
-                            shadowOffsetY={0}
-                            listening={false}
-                          />
-                        </>
-                      )}
+                      {focusObject.haloEnabled &&
+                        haloPaths.map((haloPath, pathIndex) => {
+                          const haloPoints = polygonToPoints(haloPath.points);
 
-                      {showSelectableOutline && (
+                          return (
+                            <React.Fragment key={`${focusObject.id}-halo-${pathIndex}`}>
+                              <Line
+                                points={haloPoints}
+                                closed={haloPath.closed}
+                                stroke={HALO_COLOR}
+                                strokeWidth={s(4)}
+                                lineJoin="round"
+                                lineCap="round"
+                                opacity={0.95}
+                                listening={tool === "halo" && isSelected && haloDraft === null}
+                                onDblClick={(e) => {
+                                  e.cancelBubble = true;
+
+                                  const pointer = getScaledPointer(e.target.getStage());
+                                  if (!pointer || haloPath.points.length < 2) return;
+
+                                  const vertices = haloPath.points;
+                                  const segmentCount = haloPath.closed
+                                    ? vertices.length
+                                    : vertices.length - 1;
+
+                                  let nearestSegment = 0;
+                                  let nearestDistance = Infinity;
+                                  let nearestPoint = { x: pointer.x, y: pointer.y };
+
+                                  for (let i = 0; i < segmentCount; i++) {
+                                    const a = vertices[i];
+                                    const b = vertices[(i + 1) % vertices.length];
+
+                                    const dx = b.x - a.x;
+                                    const dy = b.y - a.y;
+                                    const lengthSquared = dx * dx + dy * dy;
+
+                                    const t = lengthSquared === 0
+                                      ? 0
+                                      : Math.max(
+                                          0,
+                                          Math.min(
+                                            1,
+                                            ((pointer.x - a.x) * dx +
+                                              (pointer.y - a.y) * dy) / lengthSquared
+                                          )
+                                        );
+
+                                    const candidate = {
+                                      x: a.x + t * dx,
+                                      y: a.y + t * dy,
+                                    };
+
+                                    const distance =
+                                      (candidate.x - pointer.x) ** 2 +
+                                      (candidate.y - pointer.y) ** 2;
+
+                                    if (distance < nearestDistance) {
+                                      nearestDistance = distance;
+                                      nearestSegment = i;
+                                      nearestPoint = candidate;
+                                    }
+                                  }
+                                  if (e.evt.shiftKey) {
+                                    setFocusObjects((current) =>
+                                      current.map((obj) => {
+                                        if (obj.id !== focusObject.id) return obj;
+
+                                        return {
+                                          ...obj,
+                                          haloPaths: (obj.haloPaths ?? []).flatMap((path, index) => {
+                                            if (index !== pathIndex) return [path];
+
+                                            if (path.closed) {
+                                              return [
+                                                {
+                                                  points: [
+                                                    ...path.points.slice(nearestSegment + 1),
+                                                    ...path.points.slice(0, nearestSegment + 1),
+                                                  ],
+                                                  closed: false,
+                                                },
+                                              ];
+                                            }
+
+                                            const left = path.points.slice(0, nearestSegment + 1);
+                                            const right = path.points.slice(nearestSegment + 1);
+
+                                            return [
+                                              { points: left, closed: false },
+                                              { points: right, closed: false },
+                                            ].filter((part) => part.points.length >= 2);
+                                          }),
+                                        };
+                                      })
+                                    );
+
+                                    return;
+                                  }
+                                  setFocusObjects((current) =>
+                                    current.map((obj) =>
+                                      obj.id !== focusObject.id
+                                        ? obj
+                                        : {
+                                            ...obj,
+                                            haloPaths: (obj.haloPaths ?? []).map((path, index) =>
+                                              index !== pathIndex
+                                                ? path
+                                                : {
+                                                    ...path,
+                                                    points: [
+                                                      ...path.points.slice(0, nearestSegment + 1),
+                                                      nearestPoint,
+                                                      ...path.points.slice(nearestSegment + 1),
+                                                    ],
+                                                  }
+                                            ),
+                                          }
+                                    )
+                                  );
+                                }}
+                              />
+                              <Line
+                                points={haloPoints}
+                                closed={haloPath.closed}
+                                stroke={HALO_COLOR}
+                                strokeWidth={s(4)}
+                                lineJoin="round"
+                                lineCap="round"
+                                opacity={0.25}
+                                shadowColor={HALO_COLOR}
+                                shadowBlur={s(4)}
+                                shadowOffsetX={0}
+                                shadowOffsetY={0}
+                                listening={false}
+                              />
+                            </React.Fragment>
+                          );
+                        })}
+                        {tool === "halo" &&
+                          haloDraft === null &&
+                          isSelected &&
+                          focusObject.haloEnabled &&
+                          haloPaths.map((haloPath, pathIndex) =>
+                            haloPath.points.map((point, pointIndex) => (
+                              <Circle
+                                key={`${focusObject.id}-halo-${pathIndex}-point-${pointIndex}`}
+                                x={point.x}
+                                y={point.y}
+                                radius={s(5)}
+                                fill="#111111"
+                                stroke="#ffffff"
+                                strokeWidth={s(1)}
+                                draggable
+                                onMouseDown={(e) => {
+                                  e.cancelBubble = true;
+
+                                  if (!e.evt.shiftKey) return;
+
+                                  setFocusObjects((current) =>
+                                    current.map((obj) =>
+                                      obj.id !== focusObject.id
+                                        ? obj
+                                        : {
+                                            ...obj,
+                                            haloPaths: (obj.haloPaths ?? []).map((path, index) =>
+                                              index !== pathIndex ||
+                                              path.points.length <= (path.closed ? 3 : 2)
+                                                ? path
+                                                : {
+                                                    ...path,
+                                                    points: path.points.filter(
+                                                      (_, index) => index !== pointIndex
+                                                    ),
+                                                  }
+                                            ),
+                                          }
+                                    )
+                                  );
+                                }}
+                                onDragMove={(e) => {
+                                  const x = e.target.x();
+                                  const y = e.target.y();
+
+                                  setFocusObjects((current) =>
+                                    current.map((obj) => {
+                                      if (obj.id !== focusObject.id) return obj;
+
+                                      return {
+                                        ...obj,
+                                        haloPaths: (obj.haloPaths ?? []).map((path, pIndex) => {
+                                          if (pIndex !== pathIndex) return path;
+
+                                          return {
+                                            ...path,
+                                            points: path.points.map((existingPoint, index) =>
+                                              index === pointIndex
+                                                ? { x, y }
+                                                : existingPoint
+                                            ),
+                                          };
+                                        }),
+                                      };
+                                    })
+                                  );
+                                }}
+                              />
+                            ))
+                          )}
+
+                      {showSelectableOutline && tool !== "halo" && (
                         <Line
                           points={points}
                           closed
@@ -1873,19 +2166,21 @@ function App({
                   </div>
                 )}
 
+          {/* Disabled: Create detail view from focus
           {selectedFocusObject && (
-                  <button
-                    onClick={() => createDetailViewFromFocusObject(selectedFocusObject)}
-                    style={{
-                      borderRadius: 8,
-                      padding: "6px 10px",
-                      cursor: "pointer",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Create detail view from focus
-                  </button>
-                )}
+            <button
+              onClick={() => createDetailViewFromFocusObject(selectedFocusObject)}
+              style={{
+                borderRadius: 8,
+                padding: "6px 10px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Create detail view from focus
+            </button>
+          )}
+          */}
 
           {focusObjects.find((obj) => obj.id === selectedObjectId) && (
                               <div
@@ -1917,6 +2212,62 @@ function App({
                                   />{" "}
                                   Enable object halo
                                 </label>
+                                {focusObjects.find((obj) => obj.id === selectedObjectId)
+                                  ?.haloEnabled && (
+                                  <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (tool === "halo") {
+                                        setTool("focus");
+                                        return;
+                                      }
+
+                                      setFocusObjects((current) =>
+                                        current.map((obj) =>
+                                          obj.id === selectedObjectId && obj.haloPaths === undefined
+                                            ? {
+                                                ...obj,
+                                                haloPaths: [
+                                                  {
+                                                    points: obj.polygon.map((point) => ({ ...point })),
+                                                    closed: true,
+                                                  },
+                                                ],
+                                              }
+                                            : obj
+                                        )
+                                      );
+
+                                      setTool("halo");
+                                    }}
+                                    style={{
+                                      borderRadius: 8,
+                                      padding: "6px 10px",
+                                      cursor: "pointer",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {tool === "halo" ? "Done Editing" : "Edit Halo"}
+                                  </button>
+                                  {tool === "halo" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setHaloDraft((current) => current === null ? [] : null)
+                                      }
+                                      style={{
+                                        borderRadius: 8,
+                                        padding: "6px 10px",
+                                        cursor: "pointer",
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {haloDraft === null ? "Draw Halo Line" : "Cancel Drawing"}
+                                    </button>
+                                  )}
+                                </>
+                                )}
                               </div>
                             )}
 

@@ -72,13 +72,13 @@ def create_color_mask_hsv(
     v = hsv[:, :, 2].astype(np.uint8)
 
     if target == "magenta":
-        # Magenta in OpenCV HSV is around ~150
         target_hue = 150
     elif target == "cyan":
-        # Cyan in OpenCV HSV is around ~90
         target_hue = 90
+    elif target == "orange":
+        target_hue = 15
     else:
-        raise ValueError("target must be 'magenta' or 'cyan'")
+        raise ValueError("target must be 'magenta', 'cyan', or 'orange'")
 
     # Circular hue distance
     hue_diff = np.minimum(np.abs(h - target_hue), 180 - np.abs(h - target_hue))

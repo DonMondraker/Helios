@@ -11,16 +11,13 @@ from io import BytesIO
 from copy import deepcopy
 
 from ui.uploader import upload_image
-from vision.preprocessor import normalize_creoview_image
 from vision.mask_handler import (
     create_color_mask,
     clean_mask,
-    clean_context_mask,
     inspect_pixel,
     get_unique_colors,
 )
 from analysis.target_analyzer import analyze_focus_mask
-from rendering.color_mapper import render_standardized_illustration
 from rendering.callouts import draw_callouts
 from rendering.editor_annotations import (
     draw_lines_on_image,
@@ -77,66 +74,18 @@ INSET_SIZE_PRESETS = {
 
 def _create_inset_asset_from_upload(uploaded_file, session_state) -> tuple[str, dict]:
     inset_raw = Image.open(uploaded_file).convert("RGB")
-    inset_normalized = normalize_creoview_image(inset_raw)
 
     inset_focus_mask = create_color_mask(
-        image=inset_normalized,
+        image=inset_raw,
         mode="hsv",
-        target_name="magenta",
-        hue_tolerance=session_state.get("hue_tolerance", 18),
-        min_saturation=session_state.get("min_saturation", 45),
-        min_value=session_state.get("min_value", 20),
+        target_name="orange",
+        hue_tolerance=18,
+        min_saturation=45,
+        min_value=20,
     )
     inset_focus_mask = clean_mask(inset_focus_mask)
 
-    inset_context_mask = create_color_mask(
-        image=inset_normalized,
-        mode="hsv",
-        target_name="cyan",
-        hue_tolerance=session_state.get("hue_tolerance", 18),
-        min_saturation=session_state.get("min_saturation", 45),
-        min_value=session_state.get("min_value", 20),
-    )
-    inset_context_mask = clean_context_mask(
-        inset_context_mask,
-        open_kernel=0,
-        close_kernel=2,
-        min_component_area=8,
-    )
-
-    inset_focus_mask = subtract_context_supported_regions_from_focus(
-        focus_mask=inset_focus_mask,
-        context_mask=inset_context_mask,
-        min_region_area=20,
-        max_region_area_ratio=0.08,
-        final_open_kernel=0,
-    )
-
-    inset_focus_mask = subtract_non_focus_supported_regions(
-        image=inset_normalized,
-        focus_mask=inset_focus_mask,
-        hue_tolerance=st.session_state.hue_tolerance,
-        min_saturation=st.session_state.min_saturation,
-        min_value=st.session_state.min_value,
-        min_region_area=20,
-        max_region_area_ratio=0.08,
-        enclosure_ratio_threshold=0.55,
-    )
-
-    inset_context_mask = subtract_focus_overlap_from_context(
-        context_mask=inset_context_mask,
-        focus_mask=inset_focus_mask,
-        erosion_kernel=3,
-    )
-
-    inset_rendered = render_standardized_illustration(
-        image=inset_normalized,
-        focus_mask=inset_focus_mask,
-        context_mask=inset_context_mask,
-        background_threshold=session_state.get("background_threshold", 180),
-        enhance_focus=session_state.get("enhance_focus", False),
-        enhance_contour=session_state.get("enhance_contour", False),
-    )
+    inset_rendered = inset_raw.copy()
 
     asset_id = f"inset_asset_{hashlib.sha1((uploaded_file.name + str(inset_rendered.size)).encode('utf-8')).hexdigest()[:12]}"
 
@@ -144,9 +93,7 @@ def _create_inset_asset_from_upload(uploaded_file, session_state) -> tuple[str, 
         asset_id=asset_id,
         original_filename=uploaded_file.name,
         raw_image=inset_raw,
-        normalized_image=inset_normalized,
         focus_mask=inset_focus_mask,
-        context_mask=inset_context_mask,
         rendered_image=inset_rendered,
         focus_bbox=get_mask_bbox(inset_focus_mask),
     )
@@ -436,11 +383,6 @@ def restore_illustration_state(
         mode="L",
     )
 
-    session_state.context_mask = decode_image(
-        masks.get("context_mask_b64"),
-        mode="L",
-    )
-
     # Restore rendered images
     rendered_images = illustration_state.get("rendered_images", {})
 
@@ -455,7 +397,7 @@ def restore_illustration_state(
     )
 
     # Restore settings
-    for section in ("render_settings", "mask_settings"):
+    for section in ("render_settings",):
         for key, value in illustration_state.get(section, {}).items():
             session_state[key] = deepcopy(value)
 
@@ -512,7 +454,6 @@ def save_active_illustration_state(session_state) -> bool:
         return False
 
     focus_mask = session_state.get("focus_mask")
-    context_mask = session_state.get("context_mask")
     result_image = session_state.get("result_image")
     final_result_image = session_state.get("final_result_image")
 
@@ -527,49 +468,10 @@ def save_active_illustration_state(session_state) -> bool:
         },
         "masks": {
             "focus_mask_b64": encode_image(focus_mask),
-            "context_mask_b64": encode_image(context_mask),
         },
         "render_settings": {
-            "background_threshold": session_state.get(
-                "background_threshold", 180
-            ),
-            "enhance_focus": session_state.get(
-                "enhance_focus", False
-            ),
-            "enhance_contour": session_state.get(
-                "enhance_contour", False
-            ),
-            "remove_background_details": session_state.get(
-                "remove_background_details", False
-            ),
-            "reduce_background_details": session_state.get(
-                "reduce_background_details", False
-            ),
-            "background_reduce_strength": session_state.get(
-                "background_reduce_strength", 0.45
-            ),
-            "background_target_gray": session_state.get(
-                "background_target_gray", 140
-            ),
-            "background_reduce_grayscale": session_state.get(
-                "background_reduce_grayscale", False
-            ),
             "background_reduce_blur": session_state.get(
                 "background_reduce_blur", False
-            ),
-            "background_reduce_desaturate": session_state.get(
-                "background_reduce_desaturate", True
-            ),
-        },
-        "mask_settings": {
-            "hue_tolerance": session_state.get(
-                "hue_tolerance", 18
-            ),
-            "min_saturation": session_state.get(
-                "min_saturation", 45
-            ),
-            "min_value": session_state.get(
-                "min_value", 20
             ),
         },
         "workflow": {
@@ -683,7 +585,6 @@ def process_dropped_images(session_state, dropped_files: list) -> None:
             },
             "masks": {
                 "focus_mask_b64": None,
-                "context_mask_b64": None,
             },
             "annotations": {
                 "react_editor_state": None,
@@ -881,84 +782,41 @@ def pending_inset_asset_to_react(session_state):
     }
 
 
-def apply_background_detail_mode(
+def apply_background_blur(
         image: Image.Image,
         focus_mask: Image.Image | None,
-        mode: str,
-        reduce_strength: float = 0.65,
         padding_px: int = 3,
-        grayscale_background: bool = False,
-        blur_background: bool = False,
-        desaturate_background: bool = False,
         blur_radius: float = 3.5,
-        target_gray: int = 140,
 ) -> Image.Image:
-    """
-    Applies post-render background control.
+    """Blur background details while preserving focus objects."""
 
-    mode:
-    - "normal": no change
-    - "remove": white out everything outside focus objects
-    - "reduce": visually soften everything outside focus objects
-    """
-
-    if focus_mask is None or mode == "normal":
+    if focus_mask is None:
         return image
 
     base = image.convert("RGB")
-    image_np = np.array(base).astype(np.float32)
+    image_np = np.array(base)
 
     mask_np = np.array(focus_mask.convert("L"))
     focus = mask_np > 0
 
     if padding_px > 0:
         kernel = np.ones((padding_px, padding_px), np.uint8)
-        focus = cv2.dilate(focus.astype(np.uint8), kernel, iterations=1).astype(bool)
+        focus = cv2.dilate(
+            focus.astype(np.uint8),
+            kernel,
+            iterations=1,
+        ).astype(bool)
 
-    non_focus = ~focus
-
-    if mode == "remove":
-        output = image_np.copy()
-        output[non_focus] = [255, 255, 255]
-        return Image.fromarray(np.clip(output, 0, 255).astype(np.uint8))
-
-    if mode != "reduce":
-        return image
-
-    # --- Reduce mode ---
-    # --- Reduce mode ---
-    background = base.copy()
-
-    if blur_background:
-        background = background.filter(ImageFilter.GaussianBlur(radius=3.5))
-
-    if grayscale_background:
-        # Strong grayscale
-        background = ImageOps.grayscale(background).convert("RGB")
-
-    elif desaturate_background:
-        # Stronger desaturation
-        background = ImageEnhance.Color(background).enhance(0.08)
-
-    background_np = np.array(background).astype(np.float32)
-
-    effective_strength = float(np.clip(reduce_strength, 0.0, 1.0))
-
-    target_gray_value = st.session_state.get("background_target_gray", 140)
-    target_gray = np.array(
-        [target_gray_value, target_gray_value, target_gray_value],
-        dtype=np.float32,
+    background = base.filter(
+        ImageFilter.GaussianBlur(radius=blur_radius)
     )
 
-    softened_np = (
-            background_np * (1.0 - effective_strength)
-            + target_gray * effective_strength
-    )
+    background_np = np.array(background)
 
     output = image_np.copy()
-    output[non_focus] = softened_np[non_focus]
+    output[~focus] = background_np[~focus]
 
-    return Image.fromarray(np.clip(output, 0, 255).astype(np.uint8))
+    return Image.fromarray(output)
 
 
 def merge_focus_halo_state(
@@ -1009,9 +867,6 @@ def combine_masks(*masks: Image.Image | None) -> Image.Image | None:
 def render_project_startup():
     """Display the Helios project startup screen."""
 
-    # st.title("Welcome to Helios")
-    # st.caption("Your persistent technical illustration workspace")
-
     new_project_column, import_project_column = st.columns(2)
 
     with new_project_column:
@@ -1044,7 +899,6 @@ def render_project_startup():
                     },
                     "masks": {
                         "focus_mask_b64": None,
-                        "context_mask_b64": None,
                     },
                     "annotations": {
                         "react_editor_state": None,
@@ -1209,7 +1063,6 @@ def main():
     	"active_illustration_id": None,
         "workspace_open": False,
         "focus_mask": None,
-        "context_mask": None,
         "result_image": None,
         "final_result_image": None,
         "callouts": [],
@@ -1233,12 +1086,6 @@ def main():
         "pending_inset_leader_target_for": None,
         "pending_inset_reposition_for": None,
         "inset_label": "",
-        "hue_tolerance": 18,
-        "min_saturation": 45,
-        "min_value": 20,
-        "background_threshold": 180,
-        "enhance_focus": False,
-        "enhance_contour": False,
         "sidebar_section": "Render",
         "export_request_id": None,
         "last_consumed_export_request_id": None,
@@ -1252,13 +1099,8 @@ def main():
         "batch_export_bundle_key": None,
         "batch_export_requested_illustration_id": None,
         "lock_focus_objects": False,
-        "remove_background_details": False,
-        "reduce_background_details": False,
         "locked_focus_objects": None,
-        "background_reduce_strength": 0.45,
-        "background_reduce_grayscale": False,
         "background_reduce_blur": False,
-        "background_reduce_desaturate": True,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -1370,7 +1212,6 @@ def main():
                 st.session_state.library_source_active = False
                 st.session_state.original_image = None
                 st.session_state.focus_mask = None
-                st.session_state.context_mask = None
                 st.session_state.result_image = None
                 st.session_state.final_result_image = None
                 st.session_state.react_editor_state = None
@@ -1451,8 +1292,6 @@ def main():
     else:
         # st.info("Upload an image or load a saved project JSON to begin.")
         return
-    normalized_image = normalize_creoview_image(raw_image)
-    image = normalized_image
 
     if (
             st.session_state.uploaded_image_bytes is not None
@@ -1461,7 +1300,6 @@ def main():
     ):
         st.session_state.last_uploaded_filename = active_filename
         st.session_state.focus_mask = None
-        st.session_state.context_mask = None
         st.session_state.result_image = None
         st.session_state.final_result_image = None
         st.session_state.callouts = []
@@ -1479,27 +1317,9 @@ def main():
         st.session_state.pending_inset_reposition_for = None
 
     focus_mask_exists = st.session_state.focus_mask is not None
-    context_mask_exists = st.session_state.context_mask is not None
-    both_masks_exist = focus_mask_exists and context_mask_exists
     full_result = st.session_state.get("result_image")
 
     with st.sidebar:
-
-        # sidebar_logo_base64 = get_base64_image(
-        #     "app/ui/assets/helios_logo_small.png"
-        # )
-        #
-        # st.markdown(
-        #     f"""
-        #         <div style="display: flex; justify-content: center; padding: 4px 0 16px 0;">
-        #             <img
-        #                 src="data:image/png;base64,{sidebar_logo_base64}"
-        #                 style="width: 150px; max-width: 100%; height: auto;"
-        #             />
-        #         </div>
-        #         """,
-        #     unsafe_allow_html=True,
-        # )
 
         if st.button(
                 "Main Menu",
@@ -1522,108 +1342,33 @@ def main():
         st.divider()
 
         # -------------------------
-        # PHASE 1: MASK CREATION
-        if not both_masks_exist:
+        # PHASE 1: AUTOMATIC FOCUS DETECTION
+        # -------------------------
+        if not focus_mask_exists:
 
-            st.subheader("Mask Extraction")
-
-            st.slider(
-                "Hue tolerance",
-                5,
-                40,
-                key="hue_tolerance",
-                on_change=persist_active_project,
-                args=(st.session_state,),
+            focus_mask = create_color_mask(
+                image=raw_image,
+                mode="hsv",
+                target_name="orange",
+                hue_tolerance=18,
+                min_saturation=45,
+                min_value=20,
             )
 
-            st.slider(
-                "Minimum saturation",
-                10,
-                255,
-                key="min_saturation",
-                on_change=persist_active_project,
-                args=(st.session_state,),
-            )
+            focus_mask = clean_mask(focus_mask)
 
-            st.slider(
-                "Minimum brightness",
-                0,
-                255,
-                key="min_value",
-                on_change=persist_active_project,
-                args=(st.session_state,),
-            )
+            st.session_state.focus_mask = focus_mask
+            st.session_state.sidebar_section = "Render"
 
-            if st.button("Generate Masks", use_container_width=True):
-                focus_mask = create_color_mask(
-                    image=image,
-                    mode="hsv",
-                    target_name="magenta",
-                    hue_tolerance=st.session_state.hue_tolerance,
-                    min_saturation=st.session_state.min_saturation,
-                    min_value=st.session_state.min_value,
+            # Persist the automatically generated masks.
+            if not persist_active_project(st.session_state):
+                st.error(
+                    "Could not save the generated masks to SQLite. "
+                    "Your changes remain in the current session."
                 )
-                focus_mask = clean_mask(focus_mask)
+                st.stop()
 
-                context_mask = create_color_mask(
-                    image=image,
-                    mode="hsv",
-                    target_name="cyan",
-                    hue_tolerance=st.session_state.hue_tolerance,
-                    min_saturation=st.session_state.min_saturation,
-                    min_value=st.session_state.min_value,
-                )
-                context_mask = clean_context_mask(
-                    context_mask,
-                    open_kernel=0,
-                    close_kernel=2,
-                    min_component_area=8,
-                )
-
-                focus_mask = subtract_context_supported_regions_from_focus(
-                    focus_mask=focus_mask,
-                    context_mask=context_mask,
-                    min_region_area=20,
-                    max_region_area_ratio=0.08,
-                    final_open_kernel=0,
-                )
-
-                focus_mask = subtract_non_focus_supported_regions(
-                    image=image,
-                    focus_mask=focus_mask,
-                    hue_tolerance=st.session_state.hue_tolerance,
-                    min_saturation=st.session_state.min_saturation,
-                    min_value=st.session_state.min_value,
-                    min_region_area=20,
-                    max_region_area_ratio=0.08,
-                    enclosure_ratio_threshold=0.55,
-                )
-
-                context_mask = subtract_focus_overlap_from_context(
-                    context_mask=context_mask,
-                    focus_mask=focus_mask,
-                    erosion_kernel=3,
-                )
-
-                st.session_state.focus_mask = focus_mask
-                st.session_state.context_mask = context_mask
-                st.session_state.result_image = None
-                st.session_state.final_result_image = None
-                st.session_state.callouts = []
-                st.session_state.manual_lines = []
-                st.session_state.annotation_canvas_version += 1
-
-                st.session_state.sidebar_section = "Render"
-
-                # Persist the generated masks and updated workflow state.
-                if not persist_active_project(st.session_state):
-                    st.error(
-                        "Could not save the generated masks to SQLite. "
-                        "Your changes remain in the current session."
-                    )
-                    st.stop()
-
-                st.rerun()
+            st.rerun()
 
         # -------------------------
         # PHASE 2: RENDER + TOOLS
@@ -1635,7 +1380,7 @@ def main():
             # st.subheader("Menu")
             st.radio(
                 " ",
-                options=["Render", "Masks", "Export", "Settings"],
+                options=["Render", "Export", "Settings"],
                 key="sidebar_section",
                 label_visibility="collapsed",
             )
@@ -1645,79 +1390,14 @@ def main():
             if section == "Render":
                 # st.subheader("Render Illustration")
 
-                with st.expander("Advanced render options", expanded=False):
-                    # st.slider(
-                    #     "Background threshold",
-                    #     min_value=150,
-                    #     max_value=255,
-                    #     value=st.session_state.get("background_threshold", 180),
-                    #     key="background_threshold",
-                    #     on_change=persist_active_project,
-                    #     args=(st.session_state,),
-                    # )
 
-                    st.checkbox(
-                        "Enhance Focus detail",
-                        key="enhance_focus",
-                        help="Enhance details on the focus part",
-                        on_change=persist_active_project,
-                        args=(st.session_state,),
-                    )
-
-                    st.checkbox(
-                        "Enhance contours",
-                        key="enhance_contour",
-                        help="Enhance overall contours",
-                        on_change=persist_active_project,
-                        args=(st.session_state,),
-                    )
-
-                    remove_background = st.checkbox(
-                        "Remove background",
-                        key="remove_background_details",
-                        help="Keep only the focus objects and remove everything else from the rendered image.",
-                        on_change=persist_active_project,
-                        args=(st.session_state,),
-                    )
-
-                    reduce_background = st.checkbox(
-                        "Reduce background",
-                        key="reduce_background_details",
-                        disabled=remove_background,
-                        help="Soften non-focus details while keeping visual context.",
-                        on_change=persist_active_project,
-                        args=(st.session_state,),
-                    )
-
-                    if reduce_background and not remove_background:
-                        st.slider(
-                            "Background reduction intensity",
-                            min_value=0.0,
-                            max_value=1.0,
-                            value=st.session_state.get("background_reduce_strength", 0.65),
-                            step=0.05,
-                            key="background_reduce_strength",
-                            on_change=persist_active_project,
-                            args=(st.session_state,)
-                        )
-
-                        st.slider(
-                            "Background tone",
-                            min_value=50,
-                            max_value=180,
-                            value=140,
-                            key="background_target_gray",
-                            on_change=persist_active_project,
-                            args=(st.session_state,)
-                        )
-
-                        st.checkbox(
-                            "Blur background",
-                            key="background_reduce_blur",
-                            help="Softly blur non-focus background details.",
-                            on_change=persist_active_project,
-                            args=(st.session_state,)
-                        )
+                st.checkbox(
+                    "Blur background",
+                    key="background_reduce_blur",
+                    help="Softly blur background details while keeping focus objects sharp.",
+                    on_change=persist_active_project,
+                    args=(st.session_state,),
+                )
 
                 render_button_label = (
                     "Render Illustration"
@@ -1726,41 +1406,15 @@ def main():
                 )
 
                 if st.button(render_button_label, use_container_width=True):
-                    result = render_standardized_illustration(
-                        image=image,
-                        focus_mask=st.session_state.focus_mask,
-                        context_mask=st.session_state.context_mask,
-                        background_threshold=st.session_state.background_threshold,
-                        enhance_focus=st.session_state.enhance_focus,
-                        enhance_contour=st.session_state.enhance_contour,
-                    )
+                    result = raw_image.convert("RGB").copy()
 
-                    background_mode = "normal"
+                    if st.session_state.get("background_reduce_blur"):
+                        result = apply_background_blur(
+                            image=result,
+                            focus_mask=st.session_state.focus_mask,
+                        )
 
-                    if st.session_state.get("remove_background_details"):
-                        background_mode = "remove"
-                    elif (
-                            st.session_state.get("reduce_background_details")
-                            and not st.session_state.get("remove_background_details")
-                    ):
-                        background_mode = "reduce"
-
-                    protected_mask = combine_masks(
-                        st.session_state.focus_mask,
-                        st.session_state.context_mask,
-                    )
-
-                    result = apply_background_detail_mode(
-                        image=result,
-                        focus_mask=protected_mask,
-                        mode=background_mode,
-                        reduce_strength=st.session_state.get("background_reduce_strength", 0.65),
-                        grayscale_background=st.session_state.get("background_reduce_grayscale", False),
-                        blur_background=st.session_state.get("background_reduce_blur", False),
-                        desaturate_background=st.session_state.get("background_reduce_desaturate", False),
-                    )
-
-                    if st.session_state.get("lock_focus_objects") or st.session_state.get("remove_background_details"):
+                    if st.session_state.get("lock_focus_objects"):
                         focus_objects = focus_mask_to_focus_objects(
                             st.session_state.get("focus_mask"),
                             min_area=100,
@@ -1846,28 +1500,6 @@ def main():
                         if st.button("Delete Inset", use_container_width=True):
                             _delete_selected_inset(st.session_state)
                             st.rerun()
-
-            elif section == "Masks":
-                # st.subheader("Masks")
-
-                if st.button("Regenerate Masks", use_container_width=True):
-                    st.session_state.focus_mask = None
-                    st.session_state.context_mask = None
-                    st.session_state.result_image = None
-                    st.session_state.final_result_image = None
-                    st.session_state.callouts = []
-                    st.session_state.manual_lines = []
-                    st.session_state.annotation_canvas_version += 1
-
-                    # Persist the cleared masks and rendering state.
-                    if not persist_active_project(st.session_state):
-                        st.error(
-                            "Could not save the cleared masks to SQLite. "
-                            "Your changes remain in the current session."
-                        )
-                        st.stop()
-
-                    st.rerun()
 
             elif section == "Export":
                 # st.subheader("Export")
@@ -2031,10 +1663,10 @@ def main():
                 if st.session_state.get("ui_mode", "Production") == "Debug":
                     with st.expander("Debug Tools"):
                         if st.button("Inspect Center Pixel"):
-                            inspect_pixel(image)
+                            inspect_pixel(raw_image)
 
                         if st.button("Show Unique Colors"):
-                            get_unique_colors(image)
+                            get_unique_colors(raw_image)
 
                         if st.session_state.focus_mask is not None:
                             focus_analysis = analyze_focus_mask(st.session_state.focus_mask)
@@ -2052,21 +1684,10 @@ def main():
     preview_width = 900
 
     if st.session_state.result_image is None:
+        st.image(raw_image, caption="Original CAD Image", width=preview_width)
 
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.image(raw_image, caption="Original CAD Image", width=preview_width)
-
-        with col2:
-            st.image(normalized_image, caption="Normalized Image (Used for Processing)", width=preview_width)
-
-    if both_masks_exist and st.session_state.result_image is None:
-        col3, col4 = st.columns([1, 1])
-        with col3:
-            st.image(st.session_state.focus_mask, caption="Focus Mask", width=preview_width)
-        with col4:
-            st.image(st.session_state.context_mask, caption="Context Mask", width=preview_width)
+    if focus_mask_exists and st.session_state.result_image is None:
+        st.image(st.session_state.focus_mask, caption="Focus Mask", width=preview_width)
 
     if full_result is not None:
         # st.markdown("---")

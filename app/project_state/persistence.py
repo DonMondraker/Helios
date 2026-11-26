@@ -6,9 +6,7 @@ def build_inset_asset(
         asset_id: str,
         original_filename: str,
         raw_image: Image.Image | None,
-        normalized_image: Image.Image | None,
         focus_mask: Image.Image | None,
-        context_mask: Image.Image | None,
         rendered_image: Image.Image | None,
         focus_bbox: tuple[int, int, int, int] | None = None,
         pipeline_version: int = 1,
@@ -16,8 +14,6 @@ def build_inset_asset(
     image_size = None
     if rendered_image is not None:
         image_size = list(rendered_image.size)
-    elif normalized_image is not None:
-        image_size = list(normalized_image.size)
     elif raw_image is not None:
         image_size = list(raw_image.size)
 
@@ -28,9 +24,7 @@ def build_inset_asset(
         "image_size": image_size,
         "focus_bbox": list(focus_bbox) if focus_bbox is not None else None,
         "raw_image": raw_image,
-        "normalized_image": normalized_image,
         "focus_mask": focus_mask,
-        "context_mask": context_mask,
         "rendered_image": rendered_image,
     }
 
