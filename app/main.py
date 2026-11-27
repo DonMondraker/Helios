@@ -1489,7 +1489,7 @@ def main():
             # st.subheader("Menu")
             st.radio(
                 " ",
-                options=["Render", "Export", "Settings"],
+                options=["Render", "Export"],
                 key="sidebar_section",
                 label_visibility="collapsed",
             )
